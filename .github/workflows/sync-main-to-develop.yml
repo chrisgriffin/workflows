@@ -1,0 +1,22 @@
+name: Sync main to develop
+
+# Thin trigger stub, the same one every repo in the fleet carries: the body is
+# this repo's own _reusable-sync-main-to-develop.yml, called at `develop`.
+# After every push to main (a merged release PR), merges main back into
+# develop; this repo's `develop` ruleset names no bypass actor, so the push is
+# refused and the merge-back arrives as a PR to merge instead.
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  sync:
+    # The caller's grant is the ceiling: contents for the merge-back push,
+    # pull-requests for the PR the refused push falls back to.
+    permissions:
+      contents: write
+      pull-requests: write
+    uses: chrisgriffin/workflows/.github/workflows/_reusable-sync-main-to-develop.yml@develop
+    secrets:
+      RELEASE_PR_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}

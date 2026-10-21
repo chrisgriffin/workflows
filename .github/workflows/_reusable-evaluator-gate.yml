@@ -15,7 +15,8 @@ name: (reusable) Evaluator Gate
 # to chrisgriffin/ops's `develop`, so a PR that changes the gate is gated by
 # the gate already merged, never by itself.
 #
-# Required repository secrets on every caller (`secrets: inherit`):
+# Required repository secrets on every caller, passed by name (never
+# `secrets: inherit`):
 #   EVALUATOR_FIRE_TOKEN  # the Evaluator routine's API-trigger token
 #   AUTOFIX_FIRE_TOKEN    # the Autofix routine's API-trigger token
 #   OPS_GH_TOKEN          # a token that can read chrisgriffin/ops (contents:
@@ -27,6 +28,19 @@ name: (reusable) Evaluator Gate
 on:
   workflow_call:
     inputs: {}
+    secrets:
+      EVALUATOR_FIRE_TOKEN:
+        description: The Evaluator routine's API-trigger token.
+        required: false
+      AUTOFIX_FIRE_TOKEN:
+        description: The Autofix routine's API-trigger token.
+        required: false
+      OPS_GH_TOKEN:
+        description: A token with contents read on chrisgriffin/ops, where the gate script lives.
+        required: false
+      TARGET_TOKEN:
+        description: ops's own stand-in for OPS_GH_TOKEN; a target passes nothing here.
+        required: false
 
 # Commenting on a pull request needs pull-requests: write; with read the
 # gate's comment writes get 403 (ops#1168).

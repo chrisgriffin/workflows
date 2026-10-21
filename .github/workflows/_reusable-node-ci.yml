@@ -228,13 +228,16 @@ jobs:
     # observed is ~2m50s.
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           # A pull_request checkout is the merge commit refs/pull/N/merge;
           # depth 2 brings its first parent, the base, so `scope` can diff
           # without the PR files API and the `pull-requests: read` scope every
           # caller would have to grant first (ops#528).
           fetch-depth: 2
+          # Nothing below pushes, and the repo's own gate chain is
+          # caller-supplied shell: it runs in a tree that holds no token.
+          persist-credentials: false
 
       # CLAUDE.md is injected into every session in a repo, so every byte is a
       # cost paid on every run, forever. Nothing measured it until ops#1045,
@@ -508,7 +511,7 @@ jobs:
           fi
           echo "docs_only=$docs_only" | tee -a "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: ${{ inputs.node_version }}
           cache: npm
