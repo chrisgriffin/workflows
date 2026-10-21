@@ -3,8 +3,8 @@ name: build
 # This repo's CI: every workflow and action here is valid GitHub Actions
 # syntax, with shellcheck over every `run:` block. There is no Node project
 # to install, so this is a plain job rather than a call of
-# _reusable-node-ci.yml. The job name `verify` is the fleet's required
-# check name.
+# _reusable-node-ci.yml. The job is `ci`, so the check reports as
+# `build / ci`, the name every target's ruleset requires.
 #
 # actionlint is downloaded as a release tarball pinned to an exact version
 # and verified against that release's published sha256 before it runs, so
@@ -20,7 +20,7 @@ permissions:
   contents: read
 
 jobs:
-  verify:
+  ci:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
