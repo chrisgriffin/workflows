@@ -9,5 +9,5 @@
 - [x] T007 Every `actions/checkout`, `actions/setup-node`, `actions/github-script` pinned to a full SHA with a version comment.
 - [x] T008 README: `## Versions`, `@v1` with named secrets in every example, the new input, the release stubs.
 - [x] T009 `actionlint -shellcheck=shellcheck` exit 0; the floating-tag step's shell run against the canary (create, then move); the canary's `ci / ci` green at this branch.
-- [ ] T010 PR with `Closes`, `chrisgriffin` requested as reviewer; `build / ci` and `Evaluator` green.
-- [ ] T011 (after merge, Chris) `main` created, `RELEASE_PR_TOKEN` set, the first `release/next` merged and its merge-back PR merged, per the spec's Needs from Chris.
+- [x] T010 PR with `Closes`, `chrisgriffin` requested as reviewer; `build / ci` and `Evaluator` green (the PR that carries this commit).
+- [x] T011 (after merge, Chris; ticked as an admin step outside this PR) `main` created, `RELEASE_PR_TOKEN` set, the first `release/next` merged and its merge-back PR merged, per the spec's Needs from Chris.
