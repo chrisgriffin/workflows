@@ -220,7 +220,30 @@ repo is gated by what it ships: `evaluator-gate.yml`, `claude-mention.yml`
 and `sync-main-to-develop.yml` (§ Versions). `build-check.yml` is a plain
 job, `ci` (the check reports as `build / ci`, the name every target's ruleset
 requires), that downloads an exact `actionlint` release, checks its sha256
-against the published checksum, and lints every workflow here with
-shellcheck; there is no Node project to run `_reusable-node-ci.yml` against.
-`package.json` carries only the version the release flow bumps. `specs/`
-holds the spec, plan and tasks behind each change.
+against the published checksum, lints every workflow here with shellcheck,
+and runs `npm test` (§ Tests); a plain job rather than a call of
+`_reusable-node-ci.yml`, since that body is one of the files under test.
+`package.json` carries the version the release flow bumps and the test
+suite's two dev dependencies. `specs/` holds the spec, plan and tasks behind
+each change.
+
+## Tests
+
+`test/` holds a Jest suite, one file per body, that parses each workflow with
+`js-yaml` and runs the shell that decides something the way the runner would
+(`bash -e`, the step's own `env:` names) against throwaway git repos and
+fixtures: the CI gate's scope, budget and docs checks, the release PR's
+version bump, PR list and changelog splice, the release's changelog cut and
+Marketplace gates, the sync's refused-push fallback, the mention hook's guard.
+`test/workflows.test.js` pins what every file here follows: `workflow_call`
+only, secrets declared by name, a timeout on every job, a full commit SHA on
+every GitHub-owned action, nothing under `chrisgriffin/ops/.github`.
+
+The suite moved here from the operator with the bodies (ops#1683, phase B),
+so a change to a body is checked by the PR that makes it. Two things it
+cannot hold are the operator's: the words of the fleet doc templates, whose
+hashes `_reusable-node-ci.yml` carries inline as `MANIFEST`, and the
+single-source rules inline as `RULES`. The operator's own suite proves a
+tree laid from its templates passes the docs check, and its
+`npm run check:public-workflows` is what notices when either inline copy
+drifts from its source there.
