@@ -26,4 +26,9 @@ jobs:
     uses: chrisgriffin/workflows/.github/workflows/_reusable-claude-mention.yml@develop
     with:
       target: workflows
+    # `inherit`, like evaluator-gate.yml and for the same reason: a review
+    # event runs THIS file from the PR head against the body on `develop`, so
+    # the PR that adds the body's `OPS_GH_TOKEN` declaration cannot also name
+    # it here (startup_failure, zero jobs). Named in the PR after the
+    # declaration lands.
     secrets: inherit

@@ -1,0 +1,27 @@
+name: Release PR
+
+# Thin trigger stub, the same one every repo in the fleet carries: the body is
+# this repo's own _reusable-release-pr.yml, called at `develop`. On every push
+# to develop, opens (or refreshes) the draft `release/next` PR into main with
+# the conventional-commit bump of package.json's version. Merging that PR is
+# a release of these workflows: create-github-release.yml tags it `vX.Y.Z`
+# and moves the floating `vX` tag a caller's `uses:` line names.
+
+on:
+  push:
+    branches:
+      - develop
+  workflow_dispatch:
+
+jobs:
+  release-pr:
+    # The caller's grant is the ceiling: contents for the `release/next`
+    # push, pull-requests for the PR, statuses for its Evaluator status.
+    permissions:
+      contents: write
+      pull-requests: write
+      statuses: write
+    uses: chrisgriffin/workflows/.github/workflows/_reusable-release-pr.yml@develop
+    secrets:
+      RELEASE_PR_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
+      OPS_GH_TOKEN: ${{ secrets.OPS_GH_TOKEN }}

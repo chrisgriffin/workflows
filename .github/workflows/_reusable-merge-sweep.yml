@@ -11,7 +11,7 @@ name: (reusable) Merge sweep
 # cron stays as the backstop. Kept out of the Evaluator gate, which is one job
 # with one token (ops#1164).
 #
-# Required repository secret on every caller (`secrets: inherit`):
+# Required repository secret on every caller, passed by name:
 #   OPS_GH_TOKEN  # fine-grained PAT, actions:write on chrisgriffin/ops
 # ops itself has none and dispatches with TARGET_TOKEN, as
 # _reusable-claude-mention.yml does.
@@ -19,6 +19,13 @@ name: (reusable) Merge sweep
 on:
   workflow_call:
     inputs: {}
+    secrets:
+      OPS_GH_TOKEN:
+        description: Fine-grained PAT with actions write on chrisgriffin/ops, the dispatch target.
+        required: false
+      TARGET_TOKEN:
+        description: ops's own stand-in for OPS_GH_TOKEN; a target passes nothing here.
+        required: false
 
 permissions: {}
 

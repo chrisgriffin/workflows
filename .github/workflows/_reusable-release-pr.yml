@@ -61,6 +61,22 @@ on:
         type: string
         required: false
         default: ""
+    secrets:
+      RELEASE_PR_TOKEN:
+        description: >-
+          A PAT or App token that pushes `release/next` and opens the PR, so
+          the PR's checks fire (GITHUB_TOKEN's events start no workflow).
+          Falls back to GITHUB_TOKEN; the checks must then be started by hand.
+        required: false
+      OPS_GH_TOKEN:
+        description: Fine-grained PAT with actions write on chrisgriffin/ops, for the conflict-sweep dispatch.
+        required: false
+      TARGET_TOKEN:
+        description: ops's own stand-in for OPS_GH_TOKEN; a target passes nothing here.
+        required: false
+      NODE_AUTH_TOKEN:
+        description: Registry token for the `npm ci` that serves `extra_build_command`; optional.
+        required: false
 
 permissions:
   contents: write
@@ -101,7 +117,7 @@ jobs:
         with:
           token: ${{ secrets.OPS_GH_TOKEN || secrets.TARGET_TOKEN }}
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
           ref: develop
@@ -195,7 +211,7 @@ jobs:
             echo "needed=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         if: steps.in-sync.outputs.skip != 'true'
         with:
           node-version: "22"
@@ -473,7 +489,10 @@ jobs:
           # though develop was clean — reformat before committing.
           /tmp/rp-tools/node_modules/.bin/prettier --write CHANGELOG.md
 
-          git add package.json package-lock.json CHANGELOG.md
+          # A repo with no dependencies keeps no lockfile; `git add` of a
+          # path that does not exist fails the step.
+          git add package.json CHANGELOG.md
+          [ ! -f package-lock.json ] || git add package-lock.json
           # Deliberately unquoted: a space-separated list of paths, empty and
           # a no-op for most callers.
           # shellcheck disable=SC2086

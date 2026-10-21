@@ -21,9 +21,9 @@ name: (reusable) Claude Mention
 # is inherited from the caller, so this reads the caller's event exactly as
 # the old per-target copy did.
 #
-# The caller passes `secrets: inherit`, so `secrets.OPS_GH_TOKEN` below
-# resolves to whatever that target repo has stored under that name — no
-# `on.workflow_call.secrets` declaration needed for inherited secrets.
+# The caller passes its secrets by name (`secrets:` below), never
+# `secrets: inherit`, so a workflow in another repo sees only what the stub
+# hands it.
 #
 # Required repository secret on every caller:
 #   OPS_GH_TOKEN  # fine-grained PAT, actions:write on chrisgriffin/ops
@@ -39,7 +39,18 @@ on:
       target:
         required: true
         type: string
+    secrets:
+      OPS_GH_TOKEN:
+        description: Fine-grained PAT with actions write on chrisgriffin/ops, the dispatch target.
+        required: false
+      TARGET_TOKEN:
+        description: ops's own stand-in for OPS_GH_TOKEN; a target passes nothing here.
+        required: false
 
+# Both, not `issues: write` alone: the placeholder is an issue comment, but
+# on a pull request thread GITHUB_TOKEN gets 403 "Resource not accessible by
+# integration" without `pull-requests: write` (checked live on a public
+# caller, 2026-10-20).
 permissions:
   issues: write
   pull-requests: write
@@ -100,7 +111,7 @@ jobs:
       # the same check here is what a reviewer of this step can verify.
       - name: Detect a real @claude mention or an owner comment
         id: detect
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         with:
           script: |
             const strip = s =>
@@ -137,7 +148,7 @@ jobs:
       - name: Post the placeholder
         id: placeholder
         if: steps.detect.outputs.reply == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         with:
           script: |
             const p = context.payload
@@ -160,6 +171,7 @@ jobs:
         if: steps.detect.outputs.reply == 'true'
         env:
           GH_TOKEN: ${{ secrets.OPS_GH_TOKEN || secrets.TARGET_TOKEN }}
+          TARGET: ${{ inputs.target }}
           PLACEHOLDER_ID: ${{ steps.placeholder.outputs.id }}
           EVENT_KIND: ${{ github.event_name }}
           THREAD: ${{ github.event.issue.number || github.event.pull_request.number }}
@@ -179,7 +191,7 @@ jobs:
           gh workflow run mention.yml \
             --repo chrisgriffin/ops \
             --ref develop \
-            -f target="${{ inputs.target }}" \
+            -f target="$TARGET" \
             -f kind="$EVENT_KIND" \
             -f thread="$THREAD" \
             -f comment_id="$COMMENT_ID" \

@@ -6,11 +6,33 @@ fleet calls. Public, so a public caller can use them: GitHub refuses a
 public one (verified live, chrisgriffin/ops#440).
 
 A target commits only a thin trigger stub, the `on:` block plus one job that
-`uses:` a workflow here at `@develop`, so a fix lands once and every caller
-picks it up on merge. Secrets reach a workflow through the stub's
-`secrets: inherit`; they are named here, never held here. The caller's
-`permissions:` is the ceiling: a stub grants at least what the called job
-declares, or the run fails at startup with zero jobs.
+`uses:` a workflow here at `@v1`, the floating major tag, so a fix lands once
+here and every caller picks it up on release. Every workflow declares the
+secrets it reads under `on.workflow_call.secrets`, and a stub passes each one
+by name (`secrets:` with `${{ secrets.NAME }}` entries), never
+`secrets: inherit`, so a workflow in another repo sees only what the stub
+hands it; they are named here, never held here. The caller's `permissions:`
+is the ceiling: a stub grants at least what the called job declares, or the
+run fails at startup with zero jobs.
+
+## Versions
+
+Releases follow the fleet's own flow, run here on this repo's stubs: every
+push to `develop` refreshes the draft `release/next` PR into `main` with the
+conventional-commit bump of `package.json`'s version (`feat` minor, `fix`
+patch, a breaking change major); merging it tags the merge commit `vX.Y.Z`,
+cuts that version's `CHANGELOG.md` section into a GitHub Release, and moves
+the floating `vX` tag onto it (`_reusable-create-github-release.yml`'s
+`floating_major_tag` input). A caller writes `@v1` and follows every v1
+release with no PR of its own; a breaking change is a new major the caller
+moves to on purpose. A caller that must pin harder writes the exact `@v1.4.2`.
+This repo's own stubs call `@develop`, so the repo is gated by what it ships
+before it ships it. The two composite actions are called at `@develop` from
+the workflow bodies: both are glue around scripts that live in the operator at
+`develop` anyway, so a tag on the glue would pin nothing.
+
+Every GitHub-owned action the bodies use is pinned to a full commit SHA with
+its version in a trailing comment; bump the SHA and the comment together.
 
 Why the caller side of each workflow looks the way it does (mirror jobs for a
 ruleset's required check name, `ready_for_review` in a stub's trigger types,
@@ -37,7 +59,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    uses: chrisgriffin/workflows/.github/workflows/_reusable-node-ci.yml@develop
+    uses: chrisgriffin/workflows/.github/workflows/_reusable-node-ci.yml@v1
     with:
       run: npm run verify
       claude_md_budget: "8500"
@@ -61,8 +83,11 @@ from a fork is skipped, never failed.
 ```yaml
 jobs:
   evaluator:
-    uses: chrisgriffin/workflows/.github/workflows/_reusable-evaluator-gate.yml@develop
-    secrets: inherit
+    uses: chrisgriffin/workflows/.github/workflows/_reusable-evaluator-gate.yml@v1
+    secrets:
+      EVALUATOR_FIRE_TOKEN: ${{ secrets.EVALUATOR_FIRE_TOKEN }}
+      AUTOFIX_FIRE_TOKEN: ${{ secrets.AUTOFIX_FIRE_TOKEN }}
+      OPS_GH_TOKEN: ${{ secrets.OPS_GH_TOKEN }}
 ```
 
 ## `_reusable-claude-mention.yml` — the `@claude` responder
@@ -79,10 +104,11 @@ comment or review the owner writes. Anyone else gets nothing.
 ```yaml
 jobs:
   dispatch:
-    uses: chrisgriffin/workflows/.github/workflows/_reusable-claude-mention.yml@develop
+    uses: chrisgriffin/workflows/.github/workflows/_reusable-claude-mention.yml@v1
     with:
       target: token-atlas
-    secrets: inherit
+    secrets:
+      OPS_GH_TOKEN: ${{ secrets.OPS_GH_TOKEN }}
 ```
 
 ## `_reusable-release-pr.yml` — the rolling release PR
@@ -104,8 +130,10 @@ jobs:
       contents: write
       pull-requests: write
       statuses: write
-    uses: chrisgriffin/workflows/.github/workflows/_reusable-release-pr.yml@develop
-    secrets: inherit
+    uses: chrisgriffin/workflows/.github/workflows/_reusable-release-pr.yml@v1
+    secrets:
+      RELEASE_PR_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
+      OPS_GH_TOKEN: ${{ secrets.OPS_GH_TOKEN }}
 ```
 
 ## `_reusable-create-github-release.yml` — the GitHub Release
@@ -117,7 +145,9 @@ VS Code extension to the Marketplace.
 
 - Inputs: `node_version` (`22`), `build_command`, `release_assets`,
   `npm_registry_url`, `npm_scope` (`@chrisgriffin`), `marketplace_packages`
-  (all but the first two defaults empty: the bare path).
+  (all but the first two defaults empty: the bare path), `floating_major_tag`
+  (`false`; `true` also moves the `vX` tag onto the release, for a repo
+  other repos `uses:` by tag).
 - Secrets: `VSCE_PAT` (only with `marketplace_packages`).
 - The stub grants `contents: write` (`packages: write` to publish a package).
 
@@ -127,12 +157,13 @@ jobs:
     if: github.event.pull_request.merged == true
     permissions:
       contents: write
-    uses: chrisgriffin/workflows/.github/workflows/_reusable-create-github-release.yml@develop
+    uses: chrisgriffin/workflows/.github/workflows/_reusable-create-github-release.yml@v1
     with:
       build_command: npm ci && npm run package
       release_assets: ./*.vsix
       marketplace_packages: ./*.vsix
-    secrets: inherit
+    secrets:
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
 ```
 
 ## `_reusable-sync-main-to-develop.yml` — the merge-back
@@ -147,8 +178,12 @@ push the branch ruleset refuses, opens a PR instead of failing silently.
 ```yaml
 jobs:
   sync:
-    uses: chrisgriffin/workflows/.github/workflows/_reusable-sync-main-to-develop.yml@develop
-    secrets: inherit
+    permissions:
+      contents: write
+      pull-requests: write
+    uses: chrisgriffin/workflows/.github/workflows/_reusable-sync-main-to-develop.yml@v1
+    secrets:
+      RELEASE_PR_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
 ```
 
 ## `_reusable-merge-sweep.yml` — the conflict sweep, for a repo with no Release PR
@@ -163,8 +198,9 @@ at once instead of waiting for its cron. A repo that calls
 ```yaml
 jobs:
   dispatch:
-    uses: chrisgriffin/workflows/.github/workflows/_reusable-merge-sweep.yml@develop
-    secrets: inherit
+    uses: chrisgriffin/workflows/.github/workflows/_reusable-merge-sweep.yml@v1
+    secrets:
+      OPS_GH_TOKEN: ${{ secrets.OPS_GH_TOKEN }}
 ```
 
 ## Composite actions
@@ -177,10 +213,40 @@ jobs:
 
 ## This repo's own workflows
 
-The three stubs every target carries, calling the bodies above at `develop`
-so this repo is gated by what it ships: `evaluator-gate.yml`,
-`claude-mention.yml` (`target: workflows`) and `build-check.yml`. The last
-is a plain job, `ci` (the check reports as `build / ci`, the name every target's ruleset requires), that downloads an exact `actionlint` release,
-checks its sha256 against the published checksum, and lints every workflow
-here with shellcheck; there is no Node project to run `_reusable-node-ci.yml`
-against. `specs/` holds the spec, plan and tasks behind each change.
+The stubs every target carries, calling the bodies above at `develop` so this
+repo is gated by what it ships: `evaluator-gate.yml`, `claude-mention.yml`
+(`target: workflows`), `build-check.yml`, and the release flow's
+`release-pr.yml`, `create-github-release.yml` (`floating_major_tag: true`)
+and `sync-main-to-develop.yml` (§ Versions). `build-check.yml` is a plain
+job named `build / ci` (the check every target's ruleset requires; a plain
+job's check-run is its job name alone), that downloads an exact `actionlint` release, checks its sha256
+against the published checksum, lints every workflow here with shellcheck,
+and runs `npm test` (§ Tests); a plain job rather than a call of
+`_reusable-node-ci.yml`, since that body is one of the files under test.
+`package.json` carries the version the release flow bumps and the test
+suite's two dev dependencies. `specs/` holds the spec, plan and tasks behind
+each change.
+
+## Tests
+
+`test/` holds a Jest suite, one file per body, that parses each workflow with
+`js-yaml` and runs the shell that decides something the way the runner would
+(`bash -e`, the step's own `env:` names) against throwaway git repos and
+fixtures: the CI gate's scope, budget and docs checks, the release PR's
+version bump, PR list and changelog splice, the release's changelog cut and
+Marketplace gates, the sync's refused-push fallback, the mention hook's guard.
+`test/workflows.test.js` pins what every file here follows: `workflow_call`
+only, secrets declared by name, a timeout on every job, a full commit SHA on
+every GitHub-owned action, nothing under `chrisgriffin/ops/.github`.
+
+The suite moved here from the operator with the bodies (ops#1683, phase B),
+so a change to a body is checked by the PR that makes it. Two things it
+cannot hold are the operator's: the words of the fleet doc templates, whose
+hashes `_reusable-node-ci.yml` carries inline as `MANIFEST`, and the
+single-source rules inline as `RULES`. The operator's own suite proves a
+tree laid from its templates passes the docs check. Until
+[ops#1690](https://github.com/chrisgriffin/ops/pull/1690) merges, nothing
+checks either inline copy against its source there, so a change to a
+template or a rule in the operator has to be copied here by hand; then its
+`npm run check:public-workflows` reads this file live and notices when
+either copy drifts.
