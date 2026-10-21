@@ -1,0 +1,274 @@
+name: Create GitHub Release (reusable)
+
+# The seventh workflow to move into ops as a `workflow_call` body, joining the
+# six in README.md § Target-side workflow files. Same reason as
+# `_reusable-release-pr.yml`: this is each repo's own release automation, not
+# operator integration, and it had forked three ways while doing one job.
+#
+# Fires (via each target's stub) when a `release/*` PR opened by
+# release-pr.yml is merged into main — the real release gate, a human click.
+# Reads the version from package.json at the merge commit, lifts that
+# version's section out of CHANGELOG.md, and creates the GitHub Release+tag.
+#
+# What varied across the three copies, and how it is expressed here:
+#
+#   a site        nothing — checkout, read version, cut notes, release.
+#                 That bare path is what every input below defaults to.
+#   an extension  builds and packages a .vsix first, then attaches it to
+#                 the release  -> `build_command` + `release_assets`.
+#   a package     publishes to GitHub Packages immediately after, in the
+#                 SAME job                              -> `npm_registry_url`.
+#
+# That last one is load-bearing and must not be "tidied" into a separate
+# workflow reacting to `release: published`: a release created with
+# GITHUB_TOKEN does not trigger downstream workflows (GitHub's recursion
+# guard), so the chained publish would silently never fire. Publishing as the
+# next step in this same job is what sidesteps it.
+#
+# The changelog matcher is `/^###? \[?v?[0-9]/`, not two of the copies'
+# old `/^## \[/` and not the bare `/^## /` this carried until ops#412. It
+# matches the bracketed `## [2.2.1](compare-link) (date)` form all three
+# reusable-workflow callers generate, a hand-written bare `## v1.4.0`, and
+# a `###` heading if the preset ever emits one — while still never matching a
+# section heading like `### Bug Fixes`, because a version token must follow
+# the hashes. The level is deliberately not assumed: this file overrides only
+# types/transform/formatDate, never writer.headerPartial, so the heading level
+# belongs to the preset and can change under us. Which form a repo gets
+# depends only on its changelog preset — and now that every target generates
+# its CHANGELOG through the shared `_reusable-release-pr.yml`, hardcoding
+# either spelling is a latent empty-release-notes bug waiting for a preset
+# change. `### Bug Fixes` sub-headers do not match — not because of the hash
+# count, which now permits three, but because the required version token
+# (`[`, `v`, or a digit) never follows them. That is what keeps the awk range
+# scoped to exactly one version's section.
+
+on:
+  workflow_call:
+    inputs:
+      node_version:
+        description: Node version used for the build/publish steps.
+        required: false
+        type: string
+        default: "22"
+      build_command:
+        description: >-
+          Shell run after checkout and before the release is created — for a
+          target that must produce an artifact to attach. Empty (the default)
+          skips the step entirely.
+        required: false
+        type: string
+        default: ""
+      release_assets:
+        description: >-
+          Glob of files to attach to the release, e.g. `./*.vsix`. Empty (the
+          default) creates a release with no attached files.
+        required: false
+        type: string
+        default: ""
+      npm_registry_url:
+        description: >-
+          When set, `npm publish` runs against this registry immediately after
+          the release is created, in the same job. Empty (the default)
+          publishes nothing.
+        required: false
+        type: string
+        default: ""
+      npm_scope:
+        description: Package scope used when npm_registry_url is set.
+        required: false
+        type: string
+        default: "@chrisgriffin"
+      marketplace_packages:
+        description: >-
+          Glob of packaged VS Code extensions (`./*.vsix`) to publish to the
+          VS Code Marketplace right after the release, in the same job, with
+          the caller's `VSCE_PAT` secret. Empty (the default) publishes
+          nothing.
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  release:
+    # Only a merged `release/*` PR is a release. A closed-unmerged one, or any
+    # other branch reaching main, is not.
+    # `hotfix/` as well as `release/` — and THIS is the gate that decides it,
+    # not the caller's (found live on a target's hotfix). Every stub is a `uses:`
+    # call, and a called workflow evaluates its own job `if:` against the
+    # CALLER's event context. So teaching the four stubs about `hotfix/`
+    # without changing this line left them all inert: a merged hotfix passed
+    # the stub's condition, called this workflow, and was skipped here —
+    # zero jobs, no tag, no Release, no publish, and a green check either way.
+    if: >-
+      github.event.pull_request.merged == true &&
+      (startsWith(github.event.pull_request.head.ref, 'release/') ||
+       startsWith(github.event.pull_request.head.ref, 'hotfix/'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # Shallow on purpose: this job reads package.json and CHANGELOG.md at
+      # HEAD, and `gh release create` tags server-side — nothing walks
+      # history (ops#571). No persisted credential: every write below goes
+      # through `gh` with GITHUB_TOKEN in its environment, and the caller's
+      # build_command runs in a tree that holds no token.
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ inputs.node_version }}
+          # Only cache when there is a build to speed up: a target with no
+          # build_command may not keep a lockfile, and setup-node hard-fails
+          # on `cache: npm` when it cannot find one. Empty string = no cache.
+          cache: ${{ inputs.build_command != '' && 'npm' || '' }}
+          registry-url: ${{ inputs.npm_registry_url }}
+          scope: ${{ inputs.npm_scope }}
+
+      - name: Build release artifacts
+        if: inputs.build_command != ''
+        run: ${{ inputs.build_command }}
+        env:
+          # The token `registry-url` above expects, for a caller whose
+          # build_command installs a GitHub Packages dependency. Not live
+          # today — no caller passes both a build_command and a private dep —
+          # but it is one config change away, and it is exactly how
+          # _reusable-release-pr.yml failed six consecutive runs in silence
+          # (ops#652).
+          #
+          # Only effective if the CALLER also grants `packages: read`. Two
+          # rules together decide the effective grant, and knowing only the
+          # first is how the paired workflow shipped broken:
+          #
+          #   1. The caller's `permissions:` is the CEILING — a called
+          #      workflow can drop scopes but never add them. A stub with
+          #      `contents: write` alone still gets 401 here.
+          #   2. A callee's own `permissions:` block SETS the grant within
+          #      that ceiling rather than merging into it. This file has no
+          #      `permissions:` key, which is why the caller's grant reaches
+          #      this step at all — adding one here would silently narrow
+          #      every caller (the ops#529 outage: `_reusable-node-ci.yml`
+          #      gained `packages: read` and every caller granting less
+          #      hard-failed at startup_failure with zero jobs).
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version
+        id: version
+        run: |
+          # The release branch name is stable (`release/next`), so the version
+          # comes from package.json at the merge commit, never from the ref.
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          # A hotfix merges straight into main without going through
+          # release-pr.yml, so nothing bumped package.json — the version is
+          # whatever the last release set (ops#637). Cutting a Release for a
+          # tag that already exists fails the job and leaves a red run on a
+          # deploy that actually succeeded, which is the wrong signal on the
+          # one path taken when something is already broken.
+          #
+          # Skip instead. The hotfix still reaches main and still deploys; it
+          # simply rides in the NEXT release's notes, which is where an
+          # unbumped change belongs. A hotfix that should carry its own
+          # version bumps package.json and CHANGELOG.md in the PR, and then
+          # this step sees a new version and cuts it normally.
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "::notice::v$VERSION is already released — no version bump in this merge, so there is nothing to tag. Skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract changelog notes
+        if: steps.version.outputs.skip != 'true'
+        id: notes
+        run: |
+          # `next` after setting p=1 skips printing the heading line itself —
+          # the release already carries it via --title, so the body only
+          # needs the section content beneath it (ops#484: without `next` the
+          # heading printed twice).
+          # `###? ` followed by a version, NOT a bare `/^## /`:
+          # conventional-changelog's own headerPartial is `## ` today, but the
+          # preset here overrides only types/transform/formatDate — never
+          # writer.headerPartial — so the heading level is the preset's to
+          # change, and a `###` patch heading would silently make this read the
+          # PREVIOUS version's notes. Requiring a version token after the
+          # hashes also means `### Bug Fixes` can never be mistaken for a
+          # release heading, at either level (Evaluator, ops#412).
+          # Two hashes plus an optional third, NOT the `#{2,3}` interval that
+          # says the same thing: mawk 1.3.4 20240123 ignores an interval's
+          # upper bound and matches `##` only, so a `###` heading extracted
+          # nothing at all (ops#921). `?` is portable across every awk.
+          NOTES=$(awk '/^###? \[?v?[0-9]/{if(p) exit; p=1; next} p' CHANGELOG.md)
+          {
+            echo "notes<<CHANGELOG_EOF"
+            echo "$NOTES"
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        if: steps.version.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NOTES: ${{ steps.notes.outputs.notes }}
+          VERSION: ${{ steps.version.outputs.version }}
+          ASSETS: ${{ inputs.release_assets }}
+        run: |
+          # $ASSETS is deliberately unquoted — it is a glob that must expand to
+          # the built artifacts, and it is repo config from the caller's stub,
+          # not user input. Empty expands to nothing, which is the no-asset case.
+          # shellcheck disable=SC2086
+          gh release create "v$VERSION" \
+            --title "v$VERSION" \
+            --notes "$NOTES" \
+            $ASSETS
+
+      - name: Publish package
+        if: >-
+          steps.version.outputs.skip != 'true' &&
+          inputs.npm_registry_url != ''
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ops#1358. Publishes the .vsix the Release above already carries to the
+      # VS Code Marketplace, in this same job for the same GITHUB_TOKEN
+      # recursion reason as `Publish package`, and from the same file so the
+      # listing is byte-identical to the attachment.
+      #
+      # Which repo publishes is the caller's `marketplace_packages` input:
+      # this file is public and shared across repos, so it carries no
+      # per-repo table. A caller passing nothing publishes nothing.
+      #
+      # Both gates live INSIDE the step, not in a step-level `if:` — a secret
+      # in an `if:` skips the step with no log line, and "not an extension
+      # repo" and "no PAT yet" must never read the same, or the day the PAT
+      # lands nobody can tell whether publishing started. Each skip says which
+      # and exits 0. Past both gates `vsce publish` is unguarded: an expired
+      # PAT or a version already on the Marketplace reds the release, because
+      # a swallowed failure would look exactly like the no-op.
+      #
+      # `VSCE_PAT` reaches this step through every caller's `secrets: inherit`
+      # and vsce reads it from the environment, so the token is never on a
+      # command line. vsce is pinned to an exact 3.x, the major the fleet's
+      # extension packages with.
+      - name: Publish to the VS Code Marketplace
+        if: steps.version.outputs.skip != 'true'
+        env:
+          REPO: ${{ github.repository }}
+          PACKAGES: ${{ inputs.marketplace_packages }}
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [ -z "$PACKAGES" ]; then
+            echo "Marketplace publish skipped: $REPO passes no marketplace_packages."
+            exit 0
+          fi
+          if [ -z "$VSCE_PAT" ]; then
+            echo "::notice::Marketplace publish skipped: no VSCE_PAT secret on $REPO."
+            exit 0
+          fi
+          # $PACKAGES is deliberately unquoted: a glob from the caller's input.
+          # shellcheck disable=SC2086
+          npx --yes @vscode/vsce@3.9.2 publish --packagePath $PACKAGES

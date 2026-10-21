@@ -1,0 +1,74 @@
+name: (reusable) Evaluator Gate
+
+# Called via `workflow_call` from every repo's thin evaluator-gate.yml stub.
+# The github context is the caller's event.
+#
+# The PR review loop's dispatcher (chrisgriffin/ops#1164, ADR-017). Every PR
+# event, and every edit a routine makes to a loop comment, runs the gate
+# script through the pr-loop-gate action. It reads the loop's
+# state blocks, writes the required `Evaluator` commit status, and starts the
+# Evaluator or Autofix routine through its API trigger when the PR owes a run.
+# It is the only thing that starts either routine: no draft toggle, no label,
+# no Slack.
+#
+# The action is pinned to this repo's `develop`, and the gate script it runs
+# to chrisgriffin/ops's `develop`, so a PR that changes the gate is gated by
+# the gate already merged, never by itself.
+#
+# Required repository secrets on every caller (`secrets: inherit`):
+#   EVALUATOR_FIRE_TOKEN  # the Evaluator routine's API-trigger token
+#   AUTOFIX_FIRE_TOKEN    # the Autofix routine's API-trigger token
+#   OPS_GH_TOKEN          # a token that can read chrisgriffin/ops (contents:
+#                         # read), where the gate script lives; ops itself
+#                         # has TARGET_TOKEN instead
+# A caller missing a fire token gets a `⛔ Gate` comment naming it and a red
+# job; one missing the read token gets a red job naming it.
+
+on:
+  workflow_call:
+    inputs: {}
+
+# Commenting on a pull request needs pull-requests: write; with read the
+# gate's comment writes get 403 (ops#1168).
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+  statuses: write
+
+jobs:
+  gate:
+    # Every PR event from a branch in this repo. On a comment: a routine's
+    # edit to a loop comment (the loop's own events), or `/autofix` from the
+    # repo owner. The gate's own writes use GITHUB_TOKEN, whose events start
+    # no workflow, so it cannot loop on itself. Who may start a round is
+    # policy, and lives here once (ops#941), not in the stubs.
+    # A release head never wakes the gate (ops#1372): the Release PR job
+    # posts its Evaluator status as it pushes release/next.
+    #
+    # A pull request from a FORK is skipped, not failed: its run has no
+    # secrets and a read-only token, so the gate could neither read the
+    # script nor write the status, and a red job would block the PR under a
+    # ruleset that requires this check. Skipped, the check-run completes and
+    # the `Evaluator` commit status is simply never posted, so a fork PR
+    # waits for a maintainer rather than a machine.
+    if: >-
+      (github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !startsWith(github.event.pull_request.head.ref, 'release/')) ||
+      (github.event.issue.pull_request &&
+      (((github.event.sender.login == 'claude[bot]' || github.event.sender.login == 'cgio-agent') &&
+      contains(github.event.comment.body, '<!-- pr-loop ')) ||
+      (github.event.action == 'created' &&
+      github.event.comment.author_association == 'OWNER' &&
+      startsWith(github.event.comment.body, '/autofix') &&
+      !startsWith(github.event.comment.body, '/autofix:'))))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: chrisgriffin/workflows/.github/actions/pr-loop-gate@develop
+        with:
+          github-token: ${{ github.token }}
+          evaluator-fire-token: ${{ secrets.EVALUATOR_FIRE_TOKEN }}
+          autofix-fire-token: ${{ secrets.AUTOFIX_FIRE_TOKEN }}
+          ops-token: ${{ secrets.OPS_GH_TOKEN || secrets.TARGET_TOKEN }}

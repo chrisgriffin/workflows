@@ -1,0 +1,30 @@
+# Start ops's conflict sweep (stale-grade-sweep.yml) now, instead of waiting
+# for its 20-minute cron, which GitHub fires hours late (ops#1268). One home
+# for the call (ops#1372): the Release PR job runs it on every push to a
+# repo's develop, and _reusable-merge-sweep.yml runs it for a repo with no
+# Release PR.
+name: Dispatch the conflict sweep
+description: Dispatch stale-grade-sweep.yml on chrisgriffin/ops at develop.
+
+inputs:
+  token:
+    description: A token with actions:write on chrisgriffin/ops (OPS_GH_TOKEN, or TARGET_TOKEN in ops itself).
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Dispatch the conflict sweep on ops
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+      run: |
+        set -euo pipefail
+        if [ -z "${GH_TOKEN:-}" ]; then
+          echo "::error::OPS_GH_TOKEN is not set, so a merge here cannot start the conflict sweep on chrisgriffin/ops. Add the fine-grained PAT with actions:write on that repo as a repository secret."
+          exit 1
+        fi
+        gh workflow run stale-grade-sweep.yml \
+          --repo chrisgriffin/ops \
+          --ref develop
