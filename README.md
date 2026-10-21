@@ -174,3 +174,13 @@ jobs:
   Evaluator gate.
 - `.github/actions/dispatch-sweep` — `gh workflow run stale-grade-sweep.yml`
   on chrisgriffin/ops with `token`; used by the Release PR and merge sweep.
+
+## This repo's own workflows
+
+The three stubs every target carries, calling the bodies above at `develop`
+so this repo is gated by what it ships: `evaluator-gate.yml`,
+`claude-mention.yml` (`target: workflows`) and `build-check.yml`. The last
+is a plain job, `verify`, that downloads an exact `actionlint` release,
+checks its sha256 against the published checksum, and lints every workflow
+here with shellcheck; there is no Node project to run `_reusable-node-ci.yml`
+against. `specs/` holds the spec, plan and tasks behind each change.

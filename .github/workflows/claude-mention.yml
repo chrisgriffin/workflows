@@ -1,0 +1,29 @@
+name: Claude Mention
+
+# Thin trigger stub, the same one every repo in the fleet carries: the body —
+# detection, the ⏳ placeholder, the dispatch to the operator — is this repo's
+# own _reusable-claude-mention.yml, called at `develop`. The `on:` block has
+# to live here because GitHub fires these events only on the repo where they
+# happen.
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+  issues:
+    types: [opened, assigned, edited]
+
+# The called workflow posts the placeholder with this token; it cannot widen it.
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  dispatch:
+    uses: chrisgriffin/workflows/.github/workflows/_reusable-claude-mention.yml@develop
+    with:
+      target: workflows
+    secrets: inherit

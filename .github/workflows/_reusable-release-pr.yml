@@ -128,7 +128,7 @@ jobs:
         run: |
           if [ "$SKIP_RELEASE" = "true" ]; then
             echo "A single [skip-release] commit (a sync merge-back) — no release built."
-            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           git fetch origin main --tags
@@ -136,7 +136,7 @@ jobs:
           AHEAD=$(git rev-list --count origin/main..origin/develop)
           if [ "$AHEAD" = "0" ]; then
             echo "develop has no commits ahead of main — nothing to release."
-            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -161,12 +161,12 @@ jobs:
           if [ "$REAL" = "0" ]; then
             echo "develop is $AHEAD commit(s) ahead of main, but all are merges — nothing new to release."
             git log --oneline origin/main..origin/develop
-            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           echo "develop is $AHEAD commit(s) ahead of main, $REAL of them real work."
-          echo "skip=false" >> $GITHUB_OUTPUT
+          echo "skip=false" >> "$GITHUB_OUTPUT"
 
       # ops#883: the install below exists only to serve extra_build_command,
       # and a caller's often decides it has nothing to do - after the
@@ -189,10 +189,10 @@ jobs:
           set -e
           if [ "$CODE" = 0 ]; then
             echo "gate: the extra build is needed"
-            echo "needed=true" >> $GITHUB_OUTPUT
+            echo "needed=true" >> "$GITHUB_OUTPUT"
           else
             echo "gate: nothing to rebuild (exit $CODE) - skipping install and hook"
-            echo "needed=false" >> $GITHUB_OUTPUT
+            echo "needed=false" >> "$GITHUB_OUTPUT"
           fi
 
       - uses: actions/setup-node@v5
@@ -363,11 +363,11 @@ jobs:
           RANGE="${BASE:+$BASE..}HEAD"
           if git log --format=%s "$RANGE" | grep -E '^[a-z]+(\([^)]*\))?!:' >/dev/null ||
             git log --format=%b "$RANGE" | grep -E '^BREAKING[ -]CHANGE:' >/dev/null; then
-            BUMP=major
+            BUMP="major"
           elif git log --format=%s "$RANGE" | grep -E '^feat(\([^)]*\))?:' >/dev/null; then
-            BUMP=minor
+            BUMP="minor"
           else
-            BUMP=patch
+            BUMP="patch"
           fi
 
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
@@ -389,12 +389,12 @@ jobs:
           git fetch --tags --force origin >/dev/null 2>&1 || true
           if git rev-parse --verify --quiet "refs/tags/v$NEXT" >/dev/null; then
             echo "Tag v$NEXT already exists — another release shipped during this run. Skipping."
-            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "skip=true" >> "$GITHUB_OUTPUT"
           else
-            echo "next=$NEXT" >> $GITHUB_OUTPUT
+            echo "next=$NEXT" >> "$GITHUB_OUTPUT"
             # Stable branch name — the same PR is reused across version bumps
             # (patch → minor, etc.) instead of closing and recreating.
-            echo "branch=release/next" >> $GITHUB_OUTPUT
+            echo "branch=release/next" >> "$GITHUB_OUTPUT"
           fi
 
       # Return an open, ready release PR to draft BEFORE the force-push below,

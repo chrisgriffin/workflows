@@ -1,0 +1,44 @@
+name: build
+
+# This repo's CI: every workflow and action here is valid GitHub Actions
+# syntax, with shellcheck over every `run:` block. There is no Node project
+# to install, so this is a plain job rather than a call of
+# _reusable-node-ci.yml. The job name `verify` is the fleet's required
+# check name.
+#
+# actionlint is downloaded as a release tarball pinned to an exact version
+# and verified against that release's published sha256 before it runs, so
+# nothing executes from a moving ref. Bump both lines together.
+
+on:
+  push:
+    branches: [develop]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install actionlint
+        env:
+          VERSION: 1.7.12
+          SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          set -euo pipefail
+          curl -sSfL -o actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v${VERSION}/actionlint_${VERSION}_linux_amd64.tar.gz"
+          echo "${SHA256}  actionlint.tar.gz" | sha256sum -c -
+          tar -xzf actionlint.tar.gz actionlint
+          ./actionlint -version
+
+      - name: Lint every workflow
+        run: ./actionlint -color -shellcheck=shellcheck .github/workflows/*.yml

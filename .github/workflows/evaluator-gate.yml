@@ -1,0 +1,28 @@
+name: Evaluator
+
+# Thin trigger stub, the same one every repo in the fleet carries: the body is
+# this repo's own _reusable-evaluator-gate.yml, called at `develop` exactly as
+# a target calls it, so this repo is gated by the gate it ships. The check-run
+# reads `evaluator / gate`; the required context is the `Evaluator` commit
+# status the gate writes.
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, converted_to_draft, synchronize]
+  # `edited` carries the loop: each routine reports by editing its comment.
+  # `created` carries the owner's `/autofix`.
+  issue_comment:
+    types: [created, edited]
+
+# The called workflow's grant is set within this ceiling; it asks for exactly
+# these four.
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+  statuses: write
+
+jobs:
+  evaluator:
+    uses: chrisgriffin/workflows/.github/workflows/_reusable-evaluator-gate.yml@develop
+    secrets: inherit
