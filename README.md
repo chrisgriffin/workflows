@@ -218,8 +218,8 @@ repo is gated by what it ships: `evaluator-gate.yml`, `claude-mention.yml`
 (`target: workflows`), `build-check.yml`, and the release flow's
 `release-pr.yml`, `create-github-release.yml` (`floating_major_tag: true`)
 and `sync-main-to-develop.yml` (§ Versions). `build-check.yml` is a plain
-job, `ci` (the check reports as `build / ci`, the name every target's ruleset
-requires), that downloads an exact `actionlint` release, checks its sha256
+job named `build / ci` (the check every target's ruleset requires; a plain
+job's check-run is its job name alone), that downloads an exact `actionlint` release, checks its sha256
 against the published checksum, lints every workflow here with shellcheck,
 and runs `npm test` (§ Tests); a plain job rather than a call of
 `_reusable-node-ci.yml`, since that body is one of the files under test.

@@ -219,10 +219,14 @@ describe("this repo's own stubs call the bodies here at develop (README § Versi
     })
   })
 
-  it("build-check.yml is a plain job named ci, so the check reports as `build / ci`", () => {
+  // A plain job's check-run is the job name alone, never `<workflow> / <job>`;
+  // only a `uses:` call reports as `<caller> / <callee>`. The ruleset requires
+  // `build / ci`, so the job carries that as its `name:`; without it every PR
+  // into develop stayed BLOCKED after CI and the Evaluator passed.
+  it("build-check.yml's plain job is named `build / ci`, the check the ruleset requires", () => {
     const wf = load("build-check.yml")
-    expect(wf.name).toBe("build")
     expect(Object.keys(wf.jobs)).toEqual(["ci"])
+    expect(wf.jobs.ci.name).toBe("build / ci")
     expect(wf.jobs.ci["runs-on"]).toBeDefined()
   })
 })

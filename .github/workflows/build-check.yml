@@ -4,8 +4,10 @@ name: build
 # syntax, with shellcheck over every `run:` block, then the suite under
 # test/ runs each body's shell against fixtures (README § Tests). A plain
 # job rather than a call of _reusable-node-ci.yml: it is two steps, and the
-# body it would call is one of the files under test. The job is `ci`, so the
-# check reports as `build / ci`, the name every target's ruleset requires.
+# body it would call is one of the files under test. The job's `name:` is
+# `build / ci`, the check every target's ruleset requires: a plain job's
+# check-run carries the job name alone, never `<workflow> / <job>`; only a
+# `uses:` call reports as `<caller job> / <callee job>`.
 #
 # actionlint is downloaded as a release tarball pinned to an exact version
 # and verified against that release's published sha256 before it runs, so
@@ -22,6 +24,7 @@ permissions:
 
 jobs:
   ci:
+    name: build / ci
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
