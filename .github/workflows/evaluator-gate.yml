@@ -25,7 +25,10 @@ permissions:
 jobs:
   evaluator:
     uses: chrisgriffin/workflows/.github/workflows/_reusable-evaluator-gate.yml@develop
-    secrets:
-      EVALUATOR_FIRE_TOKEN: ${{ secrets.EVALUATOR_FIRE_TOKEN }}
-      AUTOFIX_FIRE_TOKEN: ${{ secrets.AUTOFIX_FIRE_TOKEN }}
-      OPS_GH_TOKEN: ${{ secrets.OPS_GH_TOKEN }}
+    # `inherit`, unlike every other stub here: a pull_request event runs THIS
+    # file from the PR head against the body on `develop`, so a PR that adds
+    # the body's secret declarations cannot also be the PR that names them
+    # here (GitHub refuses a named secret the called workflow does not
+    # declare, startup_failure, zero jobs). Named in the PR after the
+    # declarations land.
+    secrets: inherit

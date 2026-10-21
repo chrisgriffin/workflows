@@ -16,7 +16,7 @@ Every caller of this repo's workflows writes `@develop`, so a merge here changes
 
 - FR-1: `_reusable-create-github-release.yml` takes `floating_major_tag` (boolean, default `false`); when true it creates or force-moves `v<major>` to the released commit after the Release exists. The Release's tag targets `github.event.pull_request.merge_commit_sha`.
 - FR-2: This repo carries `release-pr.yml`, `create-github-release.yml` (`floating_major_tag: true`) and `sync-main-to-develop.yml`, calling its own bodies at `develop`, plus the `package.json` and `CHANGELOG.md` the flow reads. The first release bumps from `1.0.0` so the floating tag is `v1`.
-- FR-3: Every `_reusable-*.yml` declares the secrets it reads under `on.workflow_call.secrets`; this repo's own stubs pass them by name and none carries `secrets: inherit`.
+- FR-3: Every `_reusable-*.yml` declares the secrets it reads under `on.workflow_call.secrets`; this repo's own stubs pass them by name, except `evaluator-gate.yml`: a pull_request event runs the stub from the PR head against the body on `develop`, so it keeps `secrets: inherit` until the declarations are on `develop` and is flipped in the PR after this one.
 - FR-4: Every `actions/checkout` here sets `persist-credentials: false`; the sync's fetch and pushes authenticate per command with the same header the release PR's push uses.
 - FR-5: `_reusable-claude-mention.yml` reads `inputs.target` from `env:`; its `permissions:` keeps `pull-requests: write` because `issues: write` alone cannot post the placeholder on a PR thread (403, checked live).
 - FR-6: Every GitHub-owned action is pinned to a full commit SHA with its version in a trailing comment.
@@ -26,7 +26,7 @@ Every caller of this repo's workflows writes `@develop`, so a merge here changes
 ## Success criteria
 
 - [ ] **Runnable:** `grep -rl 'actions/checkout' .github | xargs grep -L 'persist-credentials: false' | wc -l | tr -d ' '` prints `0` on the PR head (`2` on `develop` today).
-- [ ] `grep -rnE '^\s+secrets: inherit' .github/workflows` prints nothing on the PR head, and every `_reusable-*.yml` has an `on.workflow_call.secrets` block (`grep -L '^    secrets:' .github/workflows/_reusable-*.yml` prints nothing).
+- [ ] `grep -rlE '^\s+secrets: inherit' .github/workflows` prints only `.github/workflows/evaluator-gate.yml` on the PR head (three files on `develop` today), and every `_reusable-*.yml` has an `on.workflow_call.secrets` block (`grep -L '^    secrets:' .github/workflows/_reusable-*.yml` prints nothing).
 - [ ] `grep -rhoE 'uses: actions/[a-z-]+@[^ ]+' .github | grep -vE '@[0-9a-f]{40}$'` prints nothing on the PR head.
 - [ ] `actionlint -no-color -shellcheck=shellcheck .github/workflows/*.yml; echo "exit $?"` prints `exit 0`, and the public canary's `ci / ci` run against this branch concludes `success`.
 - [ ] after-merge: the first push to `develop` opens `release/next`; merging it (Chris) produces the `v1.x.y` Release and the `v1` tag at `main`'s merge commit.
