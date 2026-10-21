@@ -6,8 +6,8 @@ name: (reusable) Merge sweep
 #
 # ops#1268. A merge into the base moves open PRs into conflict and sends them
 # no event; stale-grade-sweep.yml finds them, but its 20-minute cron has run
-# hours late since 2026-10-01, so a conflict sat until Chris found it
-# (workstation#143). This dispatches that sweep the moment the base moves. The
+# hours late since 2026-10-01, so a conflict sat until Chris found it.
+# This dispatches that sweep the moment the base moves. The
 # cron stays as the backstop. Kept out of the Evaluator gate, which is one job
 # with one token (ops#1164).
 #

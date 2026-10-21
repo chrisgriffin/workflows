@@ -3,7 +3,7 @@ description: >
   The PR review loop's dispatcher (chrisgriffin/ops#1164). Reads the loop's
   state blocks on a PR, writes the required `Evaluator` commit status, and
   starts the Evaluator or Autofix routine through its API trigger when the
-  phase owes one. The logic is pr-loop/gate.mjs in chrisgriffin/ops, checked
+  phase owes one. The logic is the gate script in chrisgriffin/ops, checked
   out here at `develop` with a token that can read that repo: a public caller
   cannot `uses:` an action hosted in a private repo, but a job holding a
   token can clone one, so the script keeps its one home and merging there is
@@ -36,7 +36,7 @@ runs:
         OPS_TOKEN: ${{ inputs.ops-token }}
       run: |
         if [ -z "${OPS_TOKEN:-}" ]; then
-          echo "::error::OPS_GH_TOKEN is not set on this repo, so the gate cannot read pr-loop/gate.mjs out of chrisgriffin/ops. Add a token with contents read on that repo as a repository secret."
+          echo "::error::OPS_GH_TOKEN is not set on this repo, so the gate cannot read its script out of chrisgriffin/ops. Add a token with contents read on that repo as a repository secret."
           exit 1
         fi
     # No `actions/checkout` of the CALLER: the gate reads the event payload

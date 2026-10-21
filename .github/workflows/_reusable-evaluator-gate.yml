@@ -4,8 +4,8 @@ name: (reusable) Evaluator Gate
 # The github context is the caller's event.
 #
 # The PR review loop's dispatcher (chrisgriffin/ops#1164, ADR-017). Every PR
-# event, and every edit a routine makes to a loop comment, runs
-# pr-loop/gate.mjs through the pr-loop-gate action. It reads the loop's
+# event, and every edit a routine makes to a loop comment, runs the gate
+# script through the pr-loop-gate action. It reads the loop's
 # state blocks, writes the required `Evaluator` commit status, and starts the
 # Evaluator or Autofix routine through its API trigger when the PR owes a run.
 # It is the only thing that starts either routine: no draft toggle, no label,

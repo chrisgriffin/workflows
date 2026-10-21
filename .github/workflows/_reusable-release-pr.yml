@@ -22,7 +22,7 @@ name: (reusable) Release PR
 #
 # `extra_build_command`/`extra_add_paths`: the one legitimate per-repo
 # knob — a target whose release commit must also regenerate a build
-# artifact (chrisgriffin.io's résumé PDF) passes a single npm script name
+# artifact (a generated PDF, say) passes a single npm script name
 # here instead of carrying its own copy of this whole file. Every other
 # caller passes neither and this step is a no-op.
 #
@@ -85,8 +85,8 @@ jobs:
     # push to run the sweep dispatch, which was its own billed job (Merge
     # sweep) on the same push, and the rule moved into the in-sync step.
     runs-on: ubuntu-latest
-    # Every successful run finishes in under 3 minutes, including
-    # chrisgriffin.io's `extra_build_command` PDF build. Without this, a hung
+    # Every successful run finishes in under 3 minutes, including the
+    # slowest caller's `extra_build_command` build. Without this, a hung
     # step runs to GitHub's 6-hour job ceiling before it is force-cancelled:
     # five such runs burned 1,824 billed minutes in one 48-hour window — 56% of
     # the whole fleet's Actions usage — all stalled in `Calculate next version`.
@@ -105,10 +105,14 @@ jobs:
         with:
           fetch-depth: 0
           ref: develop
-          # Persisted as the git credential for the later `git push`, so the
-          # push (and thus the PR) is authored by RELEASE_PR_TOKEN's actor —
-          # not GITHUB_TOKEN, whose events never trigger downstream checks.
+          # The token clones; it is NOT persisted into .git/config, where a
+          # caller-supplied `extra_build_command` could read it. The one
+          # `git push` below authenticates itself, with the same token, so
+          # the push (and thus the PR) is still authored by RELEASE_PR_TOKEN's
+          # actor — not GITHUB_TOKEN, whose events never trigger downstream
+          # checks.
           token: ${{ secrets.RELEASE_PR_TOKEN || secrets.GITHUB_TOKEN }}
+          persist-credentials: false
 
       - name: Skip if there is nothing releasable ahead of main
         id: in-sync
@@ -165,7 +169,7 @@ jobs:
           echo "skip=false" >> $GITHUB_OUTPUT
 
       # ops#883: the install below exists only to serve extra_build_command,
-      # and chrisgriffin.io's often decides it has nothing to do - after the
+      # and a caller's often decides it has nothing to do - after the
       # job already paid ~31s of `npm ci` to find that out. A caller can now
       # answer first, in a command cheap enough to run before any install.
       #
@@ -200,10 +204,10 @@ jobs:
           cache: ${{ inputs.extra_build_command != '' && 'npm' || '' }}
           # WRITES THE .npmrc THAT `npm ci` BELOW NEEDS (ops#652). Without it
           # the install is anonymous, and a caller depending on a GitHub
-          # Packages module gets 401 Unauthorized. chrisgriffin.io is that
-          # caller — it pulls @chrisgriffin/design-drift — and its release-pr
-          # failed on every run from 2026-08-24 until this, six consecutively,
-          # producing no release PR and no red check anywhere a human looks.
+          # Packages module gets 401 Unauthorized. One caller's release-pr
+          # failed that way on every run from 2026-08-24 until this, six
+          # consecutively, producing no release PR and no red check anywhere
+          # a human looks.
           #
           # Set unconditionally rather than behind extra_build_command: it only
           # writes a config file, costs nothing when no install follows, and a
@@ -212,7 +216,7 @@ jobs:
           scope: "@chrisgriffin"
 
       # The caller repo's own node_modules is read by exactly one thing:
-      # extra_build_command (chrisgriffin.io's PDF build). Every changelog
+      # extra_build_command (a caller's artifact build). Every changelog
       # tool below runs from its own /tmp/rp-tools prefix, and `npm version`
       # needs no install — so for every caller without a build command this
       # `npm ci` was 1-3 billed minutes of pure waste on every push to
@@ -230,14 +234,13 @@ jobs:
           # from 401 to 403: "Permission installation not allowed to Read
           # organization package". The job's own token is scoped to the
           # CALLING repo, so it cannot read a package published from a
-          # different one — chrisgriffin.io installing
-          # @chrisgriffin/design-drift is exactly that shape, and it is the
-          # only caller that installs anything here.
+          # different one — which is exactly the shape of the one caller
+          # that installs anything here.
           #
-          # Same chain the checkout above already uses, for the same reason:
-          # RELEASE_PR_TOKEN is a real PAT with org-wide read. GITHUB_TOKEN
-          # stays last so a caller with no PAT and no private deps still
-          # works.
+          # Same chain the checkout above already uses: NODE_AUTH_TOKEN or
+          # RELEASE_PR_TOKEN (a PAT with read on the packages the caller
+          # installs) first; GITHUB_TOKEN stays last so a caller with no PAT
+          # and no private deps still works.
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN || secrets.RELEASE_PR_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Configure git
@@ -254,14 +257,17 @@ jobs:
         # conventionalcommits and have Node's normal upward module
         # resolution actually find it (found live, ops#439: a config at
         # bare /tmp cannot resolve any import at all — every release PR
-        # would have silently never opened). Pinned versions, installed
-        # once here rather than a separate `npx --yes` per call.
+        # would have silently never opened). Exact versions, installed once
+        # here rather than a separate `npx --yes` per call, and with
+        # `--ignore-scripts`: nothing these three need runs at install time,
+        # and a lifecycle script is the one thing a registry compromise would
+        # use to run code in a job that holds a release token.
         run: |
           mkdir -p /tmp/rp-tools
-          npm install --no-save --prefix /tmp/rp-tools \
-            conventional-changelog-cli@5 \
-            conventional-changelog-conventionalcommits@8 \
-            prettier@3
+          npm install --no-save --ignore-scripts --prefix /tmp/rp-tools \
+            conventional-changelog-cli@5.0.0 \
+            conventional-changelog-conventionalcommits@8.0.0 \
+            prettier@3.9.10
 
       - name: Write the ephemeral changelog config
         if: steps.in-sync.outputs.skip != 'true'
@@ -271,7 +277,7 @@ jobs:
         # Pacific-time date formatter both matter everywhere an ops-managed
         # Night Shift/PM loop can post a recap or STATE.md update that
         # mentions an issue number without a real closing keyword — not
-        # just chrisgriffin.io, where the gap was first found. Written into
+        # just the repo where the gap was first found. Written into
         # the tool prefix (not bare /tmp) so its own import resolves.
         run: |
           cat > /tmp/rp-tools/changelog-preset.config.mjs <<'EOF'
@@ -350,7 +356,7 @@ jobs:
           # A bump tool used to decide this, and on a long history it printed
           # its answer and then never exited (ops#451). The 120s timeout that
           # kept releases moving billed those 120s on every push to develop in
-          # chrisgriffin.io, design-drift and ops — ~170 min/week (Actions
+          # three repos — ~170 min/week (Actions
           # audit 2026-09-13). grep without -q drains git's output, so nothing
           # here can wedge on a pipe the same way.
           BASE=$(git describe --tags --match 'v[0-9]*' --abbrev=0 HEAD 2>/dev/null || true)
@@ -420,6 +426,10 @@ jobs:
           EXTRA_BUILD_COMMAND: ${{ inputs.extra_build_command }}
           EXTRA_BUILD_NEEDED: ${{ steps.extra-build-gate.outputs.needed }}
           EXTRA_PATHS: ${{ inputs.extra_add_paths }}
+          # For the one `git push` at the end, and nowhere else: the checkout
+          # persisted no credential, so the caller's build command runs in a
+          # tree that holds no token.
+          RELEASE_PR_TOKEN: ${{ secrets.RELEASE_PR_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           git checkout -B "$BRANCH"
 
@@ -428,7 +438,7 @@ jobs:
           # Repo-specific build step, if the caller set one — after the
           # version bump, before committing, exactly as extra_build_command's
           # own description promises. A target regenerating a build artifact
-          # (chrisgriffin.io's résumé PDF) needs the bumped package.json
+          # (a generated PDF, say) needs the bumped package.json
           # version and a real develop checkout to build against; running
           # this any earlier would build against the pre-bump state.
           # ops#883: the gate already said there is nothing to rebuild, and
@@ -464,13 +474,19 @@ jobs:
           /tmp/rp-tools/node_modules/.bin/prettier --write CHANGELOG.md
 
           git add package.json package-lock.json CHANGELOG.md
-          # shellcheck disable=SC2086 — deliberately unquoted: a space-separated
-          # list of paths, empty and a no-op for every caller but chrisgriffin.io.
+          # Deliberately unquoted: a space-separated list of paths, empty and
+          # a no-op for most callers.
+          # shellcheck disable=SC2086
           if [ -n "$EXTRA_PATHS" ]; then
             git add $EXTRA_PATHS
           fi
           git commit -m "chore: release v${NEXT}"
-          git push origin "$BRANCH" --force
+          # The release token enters git here and only here, as a per-command
+          # header (what actions/checkout would have persisted), so it is
+          # never written to .git/config. The push's actor is the token's,
+          # which is what makes the PR's checks fire.
+          AUTH=$(printf 'x-access-token:%s' "$RELEASE_PR_TOKEN" | base64 | tr -d '\n')
+          git -c "http.extraheader=AUTHORIZATION: basic $AUTH" push origin "$BRANCH" --force
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Create or update release PR
@@ -491,7 +507,7 @@ jobs:
           # so the two sections agree (ops#816). `origin/main..origin/develop`
           # is NOT that boundary: main carries the release squash, so every
           # work commit since the previous release still looks new from main
-          # and the list repeats PRs that already shipped (design-drift#443
+          # and the list repeats PRs that already shipped (one repo's patch release
           # named six of v0.18.0's PRs in the v0.18.1 release). Only release
           # tags count — `--match 'v[0-9]*'` — because ops also carries
           # `harness--v*` plugin tags, and an unfiltered describe picked one

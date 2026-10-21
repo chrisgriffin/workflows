@@ -16,8 +16,8 @@ name: Node CI (reusable)
 # ops#439, found live, across the whole fleet.
 #
 # So a caller stub does NOT simply call this. Either the repo's ruleset is
-# updated to require the new `<job> / ci` names (the route ops and
-# design-drift took), or the stub uses the mirror-job pattern: a `call` job
+# updated to require the new `<job> / ci` names (the route two repos
+# took), or the stub uses the mirror-job pattern: a `call` job
 # that invokes this workflow, plus a second plain `runs-on:` job carrying
 # the bare name the ruleset requires, which does nothing but mirror
 # `call`'s result under `if: always()`. (The worked examples were the
@@ -25,23 +25,23 @@ name: Node CI (reusable)
 # pattern itself is written out in shared/agents/build.md's reusable-
 # workflows section, items 3 and 6.)
 #
-# EVERY active target calls this, design-drift included. It was the one
-# holdout when this landed — four distinct jobs plus a three-version Node test
-# matrix, seven required check names — and was later ported anyway, as seven
-# plain `uses:` jobs with no mirror jobs. That is NOT a licence to skip the
-# pattern above. The ops#439 rename happened there exactly as it does
-# everywhere: its check-runs became `<caller job> / ci` — `action / ci`,
-# `format / ci`, and so on — and its BRANCH RULESET WAS UPDATED to those new
-# names. Rewriting the ruleset is the only other way out of ops#439, and it
-# is available only when you can edit the ruleset in the same change; a stub
-# that drops the mirror job and leaves the ruleset naming the old bare job
-# blocks every PR in that repo forever. Its file is `ci.yml`; every other
-# target's is `build-check.yml`.
+# EVERY active target calls this. One was the holdout when this landed —
+# four distinct jobs plus a three-version Node test matrix, seven required
+# check names — and was later ported anyway, as seven plain `uses:` jobs
+# with no mirror jobs. That is NOT a licence to skip the pattern above. The
+# ops#439 rename happened there exactly as it does everywhere: its
+# check-runs became `<caller job> / ci` — `action / ci`, `format / ci`, and
+# so on — and its BRANCH RULESET WAS UPDATED to those new names. Rewriting
+# the ruleset is the only other way out of ops#439, and it is available only
+# when you can edit the ruleset in the same change; a stub that drops the
+# mirror job and leaves the ruleset naming the old bare job blocks every PR
+# in that repo forever. That repo's file is `ci.yml`; every other target's is
+# `build-check.yml`.
 #
 # That filename difference is how this comment shipped a live outage on
 # 2026-08-22: the sweep that added `packages: read` to every caller (see the
 # `permissions:` block below) enumerated `build-check.yml`, found three of the
-# four callers, reported success, and left design-drift's CI hard-failing on
+# four callers, reported success, and left the fourth's CI hard-failing on
 # its next push. Enumerate callers by CONTENT — grep every repo's
 # `.github/workflows/*` on `develop` for `_reusable-node-ci.yml` — never by
 # filename and never from this page.
@@ -79,9 +79,9 @@ on:
           reports the required check GREEN on the skip, mark the PR ready for
           review, and NOTHING re-fires — so a never-executed pass is the status
           the branch ruleset sees at merge. The gate is defeated for anything
-          opened as a draft. That shipped live as raycast-capture#44 (fixed in
-          raycast-capture#46); token-atlas was safe only by inheriting the trigger
-          list from the workflow it replaced, not because anything checked.
+          opened as a draft. That shipped live in one repo; another was safe
+          only by inheriting the trigger list from the workflow it replaced,
+          not because anything checked.
 
 
           Pass `skip_draft: false` if you would rather gate drafts too and not
@@ -129,7 +129,7 @@ on:
           GITHUB_TOKEN. A caller pulling nothing private can ignore it.
 
 
-          A caller that DOES pull `@chrisgriffin/*` from npm.pkg.github.com
+          A caller that DOES pull a private package from GitHub Packages
           needs `packages: read` on its own `call` job — the caller's grant is
           the ceiling — and should pass a token explicitly here rather than
           using `secrets: inherit`, which would hand every one of that repo's
@@ -137,13 +137,12 @@ on:
 
 
           A CLASSIC PAT is not required — `secrets.GITHUB_TOKEN` with
-          `packages: read` does resolve the private
-          `@chrisgriffin/design-drift`. But the "verified across two full
-          green runs (chrisgriffin.io#1184)" this comment used to cite was NOT evidence of
-          that (ops#528): `actions/setup-node`'s `cache: npm` restored the
-          tarball on both, so `npm ci` never contacted the registry and never
-          exercised the permission at all. The first run to miss the cache —
-          a push to chrisgriffin.io's `main` — 403'd immediately.
+          `packages: read` does resolve a private package. But the "verified
+          across two full green runs" this comment used to cite was NOT
+          evidence of that (ops#528): `actions/setup-node`'s `cache: npm`
+          restored the tarball on both, so `npm ci` never contacted the
+          registry and never exercised the permission at all. The first run
+          to miss the cache — a push to one repo's `main` — 403'd immediately.
 
           Two assumptions have now been recorded here as measurement. When
           changing this, verify on a run whose log says the cache was MISSED;
@@ -184,9 +183,9 @@ jobs:
     # `packages: read` is NOT optional here (ops#528). For `workflow_call` the
     # CALLED workflow's block SETS the effective permissions within the
     # caller's ceiling — it narrows, it does not merge. Declaring only
-    # `contents: read` therefore DISCARDED the `packages: read` that
-    # chrisgriffin.io's stub grants explicitly for its private
-    # `@chrisgriffin/design-drift` dependency, and `npm ci` 403'd:
+    # `contents: read` therefore DISCARDED the `packages: read` that one
+    # target's stub grants explicitly for its private GitHub Packages
+    # dependency, and `npm ci` 403'd:
     #
     # AND EVERY CALLER STUB MUST GRANT IT TOO — adding a scope here is a
     # FLEET change, not a local one. "Within the caller's ceiling" is a hard
@@ -212,8 +211,8 @@ jobs:
     # header; the grant each one carries is in its own stub.
     #
     # Only the asymmetry worth writing down, because it is what defeats a
-    # filename sweep: the stub is `build-check.yml` everywhere except
-    # design-drift, whose is `ci.yml` and which calls this from seven jobs.
+    # filename sweep: the stub is `build-check.yml` everywhere except one
+    # target, whose is `ci.yml` and which calls this from seven jobs.
     #
     # Where the grant is inert (a target pulling nothing from GitHub Packages)
     # it exists solely to keep that caller's ceiling at or above what this job
@@ -239,7 +238,7 @@ jobs:
 
       # CLAUDE.md is injected into every session in a repo, so every byte is a
       # cost paid on every run, forever. Nothing measured it until ops#1045,
-      # and chrisgriffin.io reached 33,512 bytes with a single 3,122-char line
+      # and one repo reached 33,512 bytes with a single 3,122-char line
       # while two repos maintained 949 identical bytes of vault text by hand.
       #
       # The budget is the caller's `claude_md_budget` input: this file is
@@ -284,10 +283,10 @@ jobs:
             fail=1
           fi
           # One home per rule (ops#1286): a CLAUDE.md that restates a fleet
-          # rule drifts from it — chrisgriffin.io#1503 lost five rounds to a
-          # branch prefix its CLAUDE.md set. RULES is repo/single-source.json,
-          # inline because this runs in the caller's checkout;
-          # shared/test/conventions-single-source.test.js fails when they drift.
+          # rule drifts from it — one PR lost five rounds to a branch prefix
+          # its CLAUDE.md set. RULES is the operator's single-source list,
+          # inline because this runs in the caller's checkout; the operator's
+          # tests fail when the two drift.
           node --input-type=module - <<'JS' || fail=1
           import { readFileSync } from "node:fs"
           const RULES = [{"name":"dates are Pacific","home":"shared/agents/conventions.md","pattern":"America\\/Los_Angeles","flags":""},{"name":"GitHub comments use plain refs, never a closing keyword","home":"shared/agents/conventions.md","pattern":"closes\\/fixes\\/resolves|plain `#N`","flags":""},{"name":"every PR body closes its issue by keyword","home":"shared/agents/conventions.md","pattern":"Fixes #N|keyword against a bare|closes nothing","flags":""},{"name":"the closing-keyword rule's machine PRs are listed once","home":"shared/agents/conventions.md","pattern":"sync-conflict PRs|`figma-sync/` head","flags":""},{"name":"commits are Conventional Commits","home":"shared/agents/conventions.md","pattern":"Conventional Commits","flags":""},{"name":"board work is claimed on the issue first","home":"shared/agents/conventions.md","pattern":"claimed-by <session kind>|younger than 4 hours","flags":""},{"name":"never force-push","home":"shared/agents/conventions.md","pattern":"force-push|push --force","flags":"i"},{"name":"never skip a hook","home":"shared/agents/conventions.md","pattern":"no-verify","flags":""},{"name":"never auto-merge","home":"shared/agents/conventions.md","pattern":"auto-merge","flags":"i"},{"name":"no destructive git","home":"shared/agents/conventions.md","pattern":"reset --hard","flags":""},{"name":"findings: blocking or not","home":"shared/agents/conventions.md","pattern":"can't or shouldn't fix|\\*\\*Non-blocking\\*\\*: typos","flags":""},{"name":"a restatement is blocking","home":"shared/agents/conventions.md","pattern":"restates where it already has a home","flags":""},{"name":"a PR opens ready for review","home":"shared/agents/conventions.md","pattern":"never draft|never as a draft","flags":"i"},{"name":"a branch is the Spec Kit branch; no repo sets its own prefix","home":"shared/agents/build.md","pattern":"Branch prefixes|`(?:feat|fix|claude)/(?:`|<)","flags":""},{"name":"every work request starts as a spec","home":"shared/agents/build.md","pattern":"[Ee]very work request (?:goes through|runs|starts as)","flags":""},{"name":"a Done means line is marked **Runnable:**","home":"shared/agents/issue-filing.md","pattern":"command plus (?:its |an )?expected result","flags":""},{"name":"a Slack reference links what the run read","home":"shared/agents/conventions.md","pattern":"[Ll]ink what you read|never a bare `#N`|named without a link|named as a link from memory","flags":""},{"name":"a Routine reaches GitHub by repo-scoped REST","home":"shared/agents/conventions.md","pattern":"search/\\*.{0,40}403|host actually has|CLI is (?:\\*\\*)?not installed","flags":""},{"name":"Fable-plan-required never pairs with Ready in one pass","home":"shared/agents/routing.md","pattern":"Fable-plan-required` (?:and|with) `Status=Ready` in the same pass","flags":""}]
@@ -301,16 +300,16 @@ jobs:
           echo "CLAUDE.md $size/$BUDGET bytes, lines within $MAX_LINE."
 
       # Every target's docs/ follows one standard (ops#1074): the templates
-      # in ops's shared/docs/, copied in by repo/sync-docs.mjs. A fixed
+      # in the operator's shared docs, copied in by its docs sync. A fixed
       # block is the same words in every repo and is compared by hash; a slot
       # is the repo's own and only has to be filled. Every ADR has the fleet
       # header, every doc a lower-case name and one title, and nothing dated
       # (a generated report, a one-off audit) lives under docs/.
       #
       # Inline for the same reason as the budget: this runs in the CALLER's
-      # checkout and cannot read ops. MANIFEST is `sync-docs.mjs --manifest`,
-      # and ops's repo/test/docs-standard.test.js fails when it drifts from
-      # the templates. Which docs a repo owes is the caller's `docs_owed`
+      # checkout and cannot read ops. MANIFEST is what the operator's docs
+      # sync prints, and the operator's tests fail when it drifts from the
+      # templates. Which docs a repo owes is the caller's `docs_owed`
       # input; a caller passing none owes no templated doc but is held to the
       # rest.
       - name: Check docs/
@@ -338,7 +337,7 @@ jobs:
           const read = f => readFileSync(f, "utf8").replace(/\r\n/g, "\n")
           const hash = s => createHash("sha256").update(s.trim()).digest("hex")
           const BLOCK = /<!-- (fleet|slot):([a-z-]+) -->\n([\s\S]*?)\n<!-- \/\1:\2 -->/g
-          const SYNC = "run ops's repo/sync-docs.mjs against this checkout"
+          const SYNC = "re-sync docs/ from the operator's templates (its docs sync, run against this checkout)"
           // Frontmatter and fenced code are not prose: skip both.
           const split = text => {
             const m = text.match(/^---\n([\s\S]*?)\n---\n/)
@@ -402,7 +401,7 @@ jobs:
               .replace(BLOCK, (m, kind, id, body) => (kind === "slot" ? m.replace(body, "") : m))
               .split("\n").map(l => l.trim()).filter(Boolean).join("\n")
             if (text.includes("<!-- unsorted -->"))
-              fail(t.path, "an unsorted block holds text sync-docs.mjs could not place — fold it into a slot, or delete it")
+              fail(t.path, "an unsorted block holds text the docs sync could not place — fold it into a slot, or delete it")
             else if (got === want && hash(skeleton) !== t.skeleton)
               fail(t.path, `text outside the slots differs from the template (a heading or line between blocks) — ${SYNC}`)
           }
@@ -517,7 +516,7 @@ jobs:
       - name: Install dependencies
         run: ${{ inputs.install_command }}
         env:
-          # Targets that depend on @chrisgriffin/* from GitHub Packages need
+          # Targets that depend on a private GitHub Packages module need
           # this to install at all; harmless where nothing private is pulled.
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN || secrets.GITHUB_TOKEN }}
 

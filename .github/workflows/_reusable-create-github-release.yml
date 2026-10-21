@@ -12,12 +12,12 @@ name: Create GitHub Release (reusable)
 #
 # What varied across the three copies, and how it is expressed here:
 #
-#   chrisgriffin.io  nothing — checkout, read version, cut notes, release.
-#                    That bare path is what every input below defaults to.
-#   token-atlas         builds and packages a .vsix first, then attaches it to
-#                    the release  -> `build_command` + `release_assets`.
-#   design-drift     publishes to GitHub Packages immediately after, in the
-#                    SAME job                              -> `npm_registry_url`.
+#   a site        nothing — checkout, read version, cut notes, release.
+#                 That bare path is what every input below defaults to.
+#   an extension  builds and packages a .vsix first, then attaches it to
+#                 the release  -> `build_command` + `release_assets`.
+#   a package     publishes to GitHub Packages immediately after, in the
+#                 SAME job                              -> `npm_registry_url`.
 #
 # That last one is load-bearing and must not be "tidied" into a separate
 # workflow reacting to `release: published`: a release created with
@@ -25,7 +25,7 @@ name: Create GitHub Release (reusable)
 # guard), so the chained publish would silently never fire. Publishing as the
 # next step in this same job is what sidesteps it.
 #
-# The changelog matcher is `/^###? \[?v?[0-9]/`, not chrisgriffin.io's and design-drift's
+# The changelog matcher is `/^###? \[?v?[0-9]/`, not two of the copies'
 # old `/^## \[/` and not the bare `/^## /` this carried until ops#412. It
 # matches the bracketed `## [2.2.1](compare-link) (date)` form all three
 # reusable-workflow callers generate, a hand-written bare `## v1.4.0`, and
@@ -93,7 +93,7 @@ jobs:
     # Only a merged `release/*` PR is a release. A closed-unmerged one, or any
     # other branch reaching main, is not.
     # `hotfix/` as well as `release/` — and THIS is the gate that decides it,
-    # not the caller's (Evaluator, design-drift#341). Every stub is a `uses:`
+    # not the caller's (found live on a target's hotfix). Every stub is a `uses:`
     # call, and a called workflow evaluates its own job `if:` against the
     # CALLER's event context. So teaching the four stubs about `hotfix/`
     # without changing this line left them all inert: a merged hotfix passed
@@ -108,8 +108,12 @@ jobs:
     steps:
       # Shallow on purpose: this job reads package.json and CHANGELOG.md at
       # HEAD, and `gh release create` tags server-side — nothing walks
-      # history (ops#571).
+      # history (ops#571). No persisted credential: every write below goes
+      # through `gh` with GITHUB_TOKEN in its environment, and the caller's
+      # build_command runs in a tree that holds no token.
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v5
         with:
@@ -183,8 +187,8 @@ jobs:
         run: |
           # `next` after setting p=1 skips printing the heading line itself —
           # the release already carries it via --title, so the body only
-          # needs the section content beneath it (ops#484, Evaluator finding
-          # on raycast-capture#65: without `next` the heading printed twice).
+          # needs the section content beneath it (ops#484: without `next` the
+          # heading printed twice).
           # `###? ` followed by a version, NOT a bare `/^## /`:
           # conventional-changelog's own headerPartial is `## ` today, but the
           # preset here overrides only types/transform/formatDate — never
@@ -248,8 +252,8 @@ jobs:
       #
       # `VSCE_PAT` reaches this step through every caller's `secrets: inherit`
       # and vsce reads it from the environment, so the token is never on a
-      # command line. vsce is pinned to major 3, the major token-atlas packages
-      # with (its devDependency `@vscode/vsce@^3`).
+      # command line. vsce is pinned to an exact 3.x, the major the fleet's
+      # extension packages with.
       - name: Publish to the VS Code Marketplace
         if: steps.version.outputs.skip != 'true'
         env:
@@ -262,9 +266,9 @@ jobs:
             exit 0
           fi
           if [ -z "$VSCE_PAT" ]; then
-            echo "::notice::Marketplace publish skipped: no VSCE_PAT secret on $REPO (see chrisgriffin/token-atlas#18)."
+            echo "::notice::Marketplace publish skipped: no VSCE_PAT secret on $REPO."
             exit 0
           fi
           # $PACKAGES is deliberately unquoted: a glob from the caller's input.
           # shellcheck disable=SC2086
-          npx --yes @vscode/vsce@3 publish --packagePath $PACKAGES
+          npx --yes @vscode/vsce@3.9.2 publish --packagePath $PACKAGES

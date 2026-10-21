@@ -2,7 +2,7 @@
 # for its 20-minute cron, which GitHub fires hours late (ops#1268). One home
 # for the call (ops#1372): the Release PR job runs it on every push to a
 # repo's develop, and _reusable-merge-sweep.yml runs it for a repo with no
-# Release PR (workstation).
+# Release PR.
 name: Dispatch the conflict sweep
 description: Dispatch stale-grade-sweep.yml on chrisgriffin/ops at develop.
 

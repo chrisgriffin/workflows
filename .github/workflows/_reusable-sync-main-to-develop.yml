@@ -10,16 +10,14 @@ name: (reusable) Sync main to develop
 #
 # Authenticates with TARGET_TOKEN, falling back to RELEASE_PR_TOKEN, falling
 # back to GITHUB_TOKEN (ops#429, ops#435). Every repo in the fleet carries one
-# PAT secret or the other — ops itself has TARGET_TOKEN (cgio-agent's PAT,
-# which has a role-scoped ruleset bypass); every target has RELEASE_PR_TOKEN
-# instead (chrisgriffin's own PAT).
+# of the two: a PAT with contents write on the repo.
 #
 # THAT CHAIN IS NOT ENOUGH, and the comment here used to claim it was —
 # "always resolves to a real, bypass-eligible PAT" (ops#523). A GitHub
 # ruleset only exempts actors it EXPLICITLY NAMES in `bypass_actors`; being
-# the repo's admin or owner is not itself a bypass. design-drift's `develop`
+# the repo's admin or owner is not itself a bypass. One target's `develop`
 # ruleset was tightened on 2026-08-22 with no bypass actors at all, so every
-# token in the chain — owner PAT included — is refused there. Do not restore
+# token in the chain is refused there. Do not restore
 # the old assumption; the push path below handles a refusal instead of
 # relying on it never happening. The caller passes `secrets: inherit` so these all resolve to the
 # CALLING repo's own secrets, not ops's.
@@ -30,8 +28,8 @@ name: (reusable) Sync main to develop
 # and the retry, so it's deterministic, not a race. `run:` executes under
 # `bash -e`, so unguarded that exit killed the step before `git push` or
 # `gh pr create` ever ran: the conflict path could never actually open a PR,
-# despite that being its whole reason to exist (found auditing
-# raycast-capture#34, ops#437). `if !` runs the re-merge exempt from errexit;
+# despite that being its whole reason to exist (ops#437). `if !` runs the
+# re-merge exempt from errexit;
 # committing the conflicted tree with `--no-edit` (reusing the merge's own
 # message) is what makes the PR exist at all — a conflicted merge commits
 # nothing on its own, and a branch identical to develop makes `gh pr create`
@@ -42,11 +40,10 @@ name: (reusable) Sync main to develop
 # has no issue to close, and every repo in the fleet now requires the
 # issue-reference check on develop, so the label is what lets it merge at
 # all. --reviewer is requested as a SEPARATE, soft-failing step rather than
-# inline on `gh pr create`: when the active token is RELEASE_PR_TOKEN, the PR
-# is already authored by chrisgriffin, and GitHub hard-rejects a review
-# request from a PR's own author — that used to fail the whole `gh pr create`
-# call inline, silently leaving the conflict branch pushed with no PR at all
-# (found auditing design-drift#290).
+# inline on `gh pr create`: the PR's author is the active token's actor, and
+# when that is the reviewer GitHub hard-rejects the request from a PR's own
+# author — that used to fail the whole `gh pr create` call inline, silently
+# leaving the conflict branch pushed with no PR at all.
 
 on:
   workflow_call: {}
@@ -109,7 +106,7 @@ jobs:
             # owner status is not itself a bypass — so on a target whose
             # `develop` ruleset lists no bypass actor, no token in the chain
             # above can push here. This used to fail the step under `bash -e`
-            # and stop, leaving `develop` silently behind `main`: design-drift
+            # and stop, leaving `develop` silently behind `main`: one target
             # shipped v0.12.0 while `develop` stayed on 0.11.0, and the next
             # release PR proposed v0.11.1 — a version BELOW the published one.
             #

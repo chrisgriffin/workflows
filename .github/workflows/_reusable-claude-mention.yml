@@ -2,8 +2,8 @@ name: (reusable) Claude Mention
 
 # Answers two things: a real `@claude` mention by the repo's owner, a member
 # or a collaborator, and any comment or review the repo owner writes
-# (ops#1202, Chris 2026-09-29: "If you are in the process of replying, then
-# there should be a fucking placeholder comment stating that"). Either way
+# (ops#1202, Chris 2026-09-29: a reply in progress must be visible on the
+# thread as a placeholder, never silent). Either way
 # the first thing on the thread is a ⏳ placeholder comment, which mention.yml
 # later replaces with the reply, or with ❌.
 #
