@@ -25,4 +25,7 @@ permissions:
 jobs:
   evaluator:
     uses: chrisgriffin/workflows/.github/workflows/_reusable-evaluator-gate.yml@develop
-    secrets: inherit
+    secrets:
+      EVALUATOR_FIRE_TOKEN: ${{ secrets.EVALUATOR_FIRE_TOKEN }}
+      AUTOFIX_FIRE_TOKEN: ${{ secrets.AUTOFIX_FIRE_TOKEN }}
+      OPS_GH_TOKEN: ${{ secrets.OPS_GH_TOKEN }}

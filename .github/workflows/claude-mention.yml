@@ -26,4 +26,5 @@ jobs:
     uses: chrisgriffin/workflows/.github/workflows/_reusable-claude-mention.yml@develop
     with:
       target: workflows
-    secrets: inherit
+    secrets:
+      OPS_GH_TOKEN: ${{ secrets.OPS_GH_TOKEN }}

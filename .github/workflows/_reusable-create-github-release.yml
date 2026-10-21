@@ -87,6 +87,23 @@ on:
         required: false
         type: string
         default: ""
+      floating_major_tag:
+        description: >-
+          Also move the floating major tag (`v1` for a `v1.4.2` release) to
+          the released commit, creating it on the first release of that
+          major. For a repo other workflows `uses:` by tag, so a caller
+          written `@v1` follows every release of the major. Off (the
+          default) touches no tag but the version's own.
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      VSCE_PAT:
+        description: >-
+          The VS Code Marketplace publisher token, read only when
+          `marketplace_packages` is set. A caller publishing nothing passes
+          nothing.
+        required: false
 
 jobs:
   release:
@@ -111,11 +128,11 @@ jobs:
       # history (ops#571). No persisted credential: every write below goes
       # through `gh` with GITHUB_TOKEN in its environment, and the caller's
       # build_command runs in a tree that holds no token.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: ${{ inputs.node_version }}
           # Only cache when there is a build to speed up: a target with no
@@ -215,15 +232,44 @@ jobs:
           NOTES: ${{ steps.notes.outputs.notes }}
           VERSION: ${{ steps.version.outputs.version }}
           ASSETS: ${{ inputs.release_assets }}
+          # The merge commit on main, so the tag lands on what was released
+          # and not on the default branch's head, which `gh release create`
+          # would tag otherwise (wrong for a repo whose default branch is
+          # `develop`, and a race for any other).
+          TARGET: ${{ github.event.pull_request.merge_commit_sha }}
         run: |
           # $ASSETS is deliberately unquoted — it is a glob that must expand to
           # the built artifacts, and it is repo config from the caller's stub,
           # not user input. Empty expands to nothing, which is the no-asset case.
           # shellcheck disable=SC2086
           gh release create "v$VERSION" \
+            --target "$TARGET" \
             --title "v$VERSION" \
             --notes "$NOTES" \
             $ASSETS
+
+      # The floating major tag, for a repo whose workflows other repos `uses:`
+      # by tag: `v1` follows every v1.x.y release, so a caller written `@v1`
+      # picks a fix up on release with no PR of its own, and a breaking change
+      # is a new major the caller moves to on purpose. Moved by force, never
+      # deleted and recreated, so a `uses:` resolving it mid-move still finds
+      # it. Only when the caller opts in: a tag nobody resolves is noise.
+      - name: Move the floating major tag
+        if: steps.version.outputs.skip != 'true' && inputs.floating_major_tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TARGET: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          MAJOR="v${VERSION%%.*}"
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$MAJOR" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$MAJOR" \
+              -f sha="$TARGET" -F force=true >/dev/null
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/tags/$MAJOR" -f sha="$TARGET" >/dev/null
+          fi
+          echo "$MAJOR -> $TARGET (v$VERSION)"
 
       - name: Publish package
         if: >-
@@ -250,8 +296,8 @@ jobs:
       # PAT or a version already on the Marketplace reds the release, because
       # a swallowed failure would look exactly like the no-op.
       #
-      # `VSCE_PAT` reaches this step through every caller's `secrets: inherit`
-      # and vsce reads it from the environment, so the token is never on a
+      # `VSCE_PAT` reaches this step through the caller's named `secrets:`
+      # entry and vsce reads it from the environment, so the token is never on a
       # command line. vsce is pinned to an exact 3.x, the major the fleet's
       # extension packages with.
       - name: Publish to the VS Code Marketplace
