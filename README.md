@@ -244,7 +244,9 @@ so a change to a body is checked by the PR that makes it. Two things it
 cannot hold are the operator's: the words of the fleet doc templates, whose
 hashes `_reusable-node-ci.yml` carries inline as `MANIFEST`, and the
 single-source rules inline as `RULES`. The operator's own suite proves a
-tree laid from its templates passes the docs check, and its
-`npm run check:public-workflows` ([ops#1690](https://github.com/chrisgriffin/ops/pull/1690))
-reads this file live and notices when either inline copy drifts from its
-source there.
+tree laid from its templates passes the docs check. Until
+[ops#1690](https://github.com/chrisgriffin/ops/pull/1690) merges, nothing
+checks either inline copy against its source there, so a change to a
+template or a rule in the operator has to be copied here by hand; then its
+`npm run check:public-workflows` reads this file live and notices when
+either copy drifts.
