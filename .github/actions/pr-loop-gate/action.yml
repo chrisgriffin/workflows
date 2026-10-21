@@ -1,0 +1,60 @@
+name: PR loop gate
+description: >
+  The PR review loop's dispatcher (chrisgriffin/ops#1164). Reads the loop's
+  state blocks on a PR, writes the required `Evaluator` commit status, and
+  starts the Evaluator or Autofix routine through its API trigger when the
+  phase owes one. The logic is pr-loop/gate.mjs in chrisgriffin/ops, checked
+  out here at `develop` with a token that can read that repo: a public caller
+  cannot `uses:` an action hosted in a private repo, but a job holding a
+  token can clone one, so the script keeps its one home and merging there is
+  still the fleet-wide deploy.
+
+inputs:
+  github-token:
+    description: The caller's GITHUB_TOKEN (statuses write, issues write).
+    required: true
+  evaluator-fire-token:
+    description: The Evaluator routine's API-trigger token (EVALUATOR_FIRE_TOKEN).
+    required: false
+    default: ""
+  autofix-fire-token:
+    description: The Autofix routine's API-trigger token (AUTOFIX_FIRE_TOKEN).
+    required: false
+    default: ""
+  ops-token:
+    description: >-
+      A token with contents read on chrisgriffin/ops (OPS_GH_TOKEN, or
+      TARGET_TOKEN in ops itself), used only to check the gate script out.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Require the token that reads the gate script
+      shell: bash
+      env:
+        OPS_TOKEN: ${{ inputs.ops-token }}
+      run: |
+        if [ -z "${OPS_TOKEN:-}" ]; then
+          echo "::error::OPS_GH_TOKEN is not set on this repo, so the gate cannot read pr-loop/gate.mjs out of chrisgriffin/ops. Add a token with contents read on that repo as a repository secret."
+          exit 1
+        fi
+    # No `actions/checkout` of the CALLER: the gate reads the event payload
+    # and the GitHub API, never the caller's tree (ADR-017).
+    - uses: actions/checkout@v5
+      with:
+        repository: chrisgriffin/ops
+        ref: develop
+        token: ${{ inputs.ops-token }}
+        path: .pr-loop-gate
+        persist-credentials: false
+    - uses: actions/setup-node@v5
+      with:
+        node-version: 22
+    - name: Gate the PR
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        EVALUATOR_FIRE_TOKEN: ${{ inputs.evaluator-fire-token }}
+        AUTOFIX_FIRE_TOKEN: ${{ inputs.autofix-fire-token }}
+      run: node .pr-loop-gate/pr-loop/gate.mjs

@@ -1,0 +1,535 @@
+name: Node CI (reusable)
+
+# Every target's CI gate is the same five moves — checkout, set up Node, install,
+# run the repo's own gate chain, done — around a few genuinely per-repo parts:
+# the commands (the `run` input), the CLAUDE.md byte budget, the docs/ the
+# repo owes to the fleet standard, and the paths a docs-only PR may touch.
+# Each is an input with an empty default that skips its check, and this file
+# carries no per-repo table: it is public and shared, so a repo's own facts
+# live in that repo's stub.
+#
+# READ THIS BEFORE WIRING A TARGET TO IT. A CI job's NAME is a required status
+# check in that repo's branch ruleset. Converting a job to `uses:` renames its
+# check-run to `<calling job> / <called job>`, which silently orphans the
+# ruleset entry naming the old bare name — every PR then blocks forever on a
+# check that can no longer report, with no error pointing at the cause. That is
+# ops#439, found live, across the whole fleet.
+#
+# So a caller stub does NOT simply call this. Either the repo's ruleset is
+# updated to require the new `<job> / ci` names (the route ops and
+# design-drift took), or the stub uses the mirror-job pattern: a `call` job
+# that invokes this workflow, plus a second plain `runs-on:` job carrying
+# the bare name the ruleset requires, which does nothing but mirror
+# `call`'s result under `if: always()`. (The worked examples were the
+# fleet's `pr-issue-reference.yml` stubs, deleted 2026-08-23, ops#537 — the
+# pattern itself is written out in shared/agents/build.md's reusable-
+# workflows section, items 3 and 6.)
+#
+# EVERY active target calls this, design-drift included. It was the one
+# holdout when this landed — four distinct jobs plus a three-version Node test
+# matrix, seven required check names — and was later ported anyway, as seven
+# plain `uses:` jobs with no mirror jobs. That is NOT a licence to skip the
+# pattern above. The ops#439 rename happened there exactly as it does
+# everywhere: its check-runs became `<caller job> / ci` — `action / ci`,
+# `format / ci`, and so on — and its BRANCH RULESET WAS UPDATED to those new
+# names. Rewriting the ruleset is the only other way out of ops#439, and it
+# is available only when you can edit the ruleset in the same change; a stub
+# that drops the mirror job and leaves the ruleset naming the old bare job
+# blocks every PR in that repo forever. Its file is `ci.yml`; every other
+# target's is `build-check.yml`.
+#
+# That filename difference is how this comment shipped a live outage on
+# 2026-08-22: the sweep that added `packages: read` to every caller (see the
+# `permissions:` block below) enumerated `build-check.yml`, found three of the
+# four callers, reported success, and left design-drift's CI hard-failing on
+# its next push. Enumerate callers by CONTENT — grep every repo's
+# `.github/workflows/*` on `develop` for `_reusable-node-ci.yml` — never by
+# filename and never from this page.
+
+on:
+  workflow_call:
+    inputs:
+      node_version:
+        description: Node version for the gate.
+        required: false
+        type: string
+        default: "22"
+      install_command:
+        description: Dependency install step.
+        required: false
+        type: string
+        default: npm ci
+      run:
+        description: >-
+          The repo's own gate chain, run after install. Multi-line is fine —
+          it becomes one shell block, so a failing command fails the job.
+          This is the one genuinely per-repo part of a CI gate.
+        required: true
+        type: string
+      skip_draft:
+        description: >-
+          Skip on a draft PR (a push always runs). Matches what most target
+          gates already did with a job-level `if:`.
+
+
+          LEAVING THIS TRUE PUTS A REQUIREMENT ON THE CALLER: the stub's
+          `on: pull_request` MUST list `ready_for_review` in its `types:`.
+          Default types are opened/synchronize/reopened and do NOT include it.
+          Without it: open a draft (this job skips), the caller's mirror job
+          reports the required check GREEN on the skip, mark the PR ready for
+          review, and NOTHING re-fires — so a never-executed pass is the status
+          the branch ruleset sees at merge. The gate is defeated for anything
+          opened as a draft. That shipped live as raycast-capture#44 (fixed in
+          raycast-capture#46); token-atlas was safe only by inheriting the trigger
+          list from the workflow it replaced, not because anything checked.
+
+
+          Pass `skip_draft: false` if you would rather gate drafts too and not
+          think about trigger types. The default stays true because running the
+          full gate on every draft push is real billed time, and #450 exists
+          because Actions spend got out of hand.
+        required: false
+        type: boolean
+        default: true
+      claude_md_budget:
+        description: >-
+          The byte budget for this repo's CLAUDE.md, as a number. Set, the
+          `Budget CLAUDE.md` step fails the gate when the file is over it,
+          when any line is over 400 characters, or when it restates a rule
+          whose one home is the fleet's shared agent docs. Empty (the
+          default) skips that step. A budget is a ratchet: lower it as the
+          file shrinks, never raise it without the inventory that justifies it.
+        required: false
+        type: string
+        default: ""
+      docs_owed:
+        description: >-
+          Space-separated names of the fleet doc templates this repo owes
+          under docs/ (any of `adr-index architecture releasing testing
+          pr-form`). The `Check docs/` step holds each to the template's
+          fixed blocks and filled slots. Empty (the default) owes none; the
+          rest of the docs/ standard still applies.
+        required: false
+        type: string
+        default: ""
+      docs_only_paths:
+        description: >-
+          Space-separated git pathspec globs (`docs/** README.md`) that a PR
+          may touch and still count as docs-only, in which case the gate runs
+          Prettier on the changed files instead of the full chain. List only
+          paths nothing in the repo's tests, build or `run` reads. Empty (the
+          default) runs the full chain on every PR.
+        required: false
+        type: string
+        default: ""
+    secrets:
+      NODE_AUTH_TOKEN:
+        description: >-
+          Registry token for `npm ci`. Optional: falls back to the automatic
+          GITHUB_TOKEN. A caller pulling nothing private can ignore it.
+
+
+          A caller that DOES pull `@chrisgriffin/*` from npm.pkg.github.com
+          needs `packages: read` on its own `call` job — the caller's grant is
+          the ceiling — and should pass a token explicitly here rather than
+          using `secrets: inherit`, which would hand every one of that repo's
+          secrets to a workflow in another repo.
+
+
+          A CLASSIC PAT is not required — `secrets.GITHUB_TOKEN` with
+          `packages: read` does resolve the private
+          `@chrisgriffin/design-drift`. But the "verified across two full
+          green runs (chrisgriffin.io#1184)" this comment used to cite was NOT evidence of
+          that (ops#528): `actions/setup-node`'s `cache: npm` restored the
+          tarball on both, so `npm ci` never contacted the registry and never
+          exercised the permission at all. The first run to miss the cache —
+          a push to chrisgriffin.io's `main` — 403'd immediately.
+
+          Two assumptions have now been recorded here as measurement. When
+          changing this, verify on a run whose log says the cache was MISSED;
+          a `Cache hit` line means the install proved nothing.
+        required: false
+
+jobs:
+  ci:
+    # A draft is skipped when the caller asks (`skip_draft`) and ALWAYS when
+    # it is the rolling release PR (release/next): _reusable-release-pr.yml
+    # returns that PR to draft before every refresh, so each develop merge
+    # skips here (~190 billed min/week, Actions audit 2026-09-13) and marking
+    # it ready runs the gate on the exact tree the merge button sits on
+    # (ops#1434). A ready PR runs on every event, synchronize included; the
+    # old "skip synchronize on release/next" let a ready release PR merge on
+    # a tree verified only when it opened.
+    #
+    # CALLEE-ONLY ON PURPOSE — the one sanctioned exception to build.md
+    # § Reusable workflows item 6 (Chris, 2026-09-13). A caller-side `if:`
+    # would emit NO check-run and block every release PR (ops#466); a job
+    # skipped here still reports `<caller> / ci` as completed/skipped, which
+    # satisfies a required check (probe: tmp/callee-skip-probe, dee7dff).
+    # Every caller stub lists ready_for_review (checked on develop,
+    # 2026-10-09), which this relies on.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.draft == false ||
+      (inputs.skip_draft != true &&
+       github.event.pull_request.head.ref != 'release/next')
+    runs-on: ubuntu-latest
+    # This job runs CALLER-SUPPLIED shell (`run: ${{ inputs.run }}`). Without
+    # a permissions block the ceiling is the calling repo's default token —
+    # read/write-all on any target that has not tightened it. A CI gate needs
+    # to read the repo and install its dependencies, and nothing else; every
+    # sibling _reusable-*.yml states its block for the same reason
+    # (shared/agents/build.md).
+    #
+    # `packages: read` is NOT optional here (ops#528). For `workflow_call` the
+    # CALLED workflow's block SETS the effective permissions within the
+    # caller's ceiling — it narrows, it does not merge. Declaring only
+    # `contents: read` therefore DISCARDED the `packages: read` that
+    # chrisgriffin.io's stub grants explicitly for its private
+    # `@chrisgriffin/design-drift` dependency, and `npm ci` 403'd:
+    #
+    # AND EVERY CALLER STUB MUST GRANT IT TOO — adding a scope here is a
+    # FLEET change, not a local one. "Within the caller's ceiling" is a hard
+    # bound, not a clamp: GitHub rejects a called workflow requesting a scope
+    # its calling job does not grant, failing the run outright rather than
+    # quietly dropping the scope. A caller whose ceiling is narrower does not
+    # degrade — its CI stops entirely.
+    #
+    # Verified live, not assumed (ops#529 Evaluator, rightly, for citing no
+    # run — a comment two screens up is about exactly this failure). A
+    # controlled pair on throwaway branches:
+    #
+    #   callee wants contents only, caller grants contents -> ran, success
+    #   callee wants + packages,    caller grants contents -> startup_failure,
+    #                                                         zero jobs
+    #
+    # THE INVARIANT, not a roster: every caller stub grants at least what this
+    # block declares, and each one had to BEFORE the scope reached `develop`.
+    # Deliberately no per-target list here — a hardcoded roster of who calls
+    # this is the exact shape that went stale and caused the outage above, and
+    # `CLAUDE.md`'s cross-repo rule says to read the directory rather than
+    # trust names on a page. Enumerate them with the loop in this file's
+    # header; the grant each one carries is in its own stub.
+    #
+    # Only the asymmetry worth writing down, because it is what defeats a
+    # filename sweep: the stub is `build-check.yml` everywhere except
+    # design-drift, whose is `ci.yml` and which calls this from seven jobs.
+    #
+    # Where the grant is inert (a target pulling nothing from GitHub Packages)
+    # it exists solely to keep that caller's ceiling at or above what this job
+    # declares — the ceiling is a hard bound, so a narrower caller does not
+    # degrade, its CI stops entirely.
+    #
+    # Adding another scope here means opening a PR against every stub first.
+    permissions:
+      contents: read
+      packages: read
+    # No cap here means GitHub's 6-hour default, which cost 1,824 billed
+    # minutes in one 48h window before ops#450. The slowest target gate
+    # observed is ~2m50s.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # A pull_request checkout is the merge commit refs/pull/N/merge;
+          # depth 2 brings its first parent, the base, so `scope` can diff
+          # without the PR files API and the `pull-requests: read` scope every
+          # caller would have to grant first (ops#528).
+          fetch-depth: 2
+
+      # CLAUDE.md is injected into every session in a repo, so every byte is a
+      # cost paid on every run, forever. Nothing measured it until ops#1045,
+      # and chrisgriffin.io reached 33,512 bytes with a single 3,122-char line
+      # while two repos maintained 949 identical bytes of vault text by hand.
+      #
+      # The budget is the caller's `claude_md_budget` input: this file is
+      # public and shared, so it carries no per-repo table, and a caller
+      # passing none is skipped, never failed. The check is inline because a
+      # called workflow runs in the CALLER's checkout and cannot read a script
+      # out of another repo.
+      #
+      # A budget is a RATCHET: lower it as a file shrinks, never raise it
+      # without the inventory that justifies it. Every repo also has a 400
+      # char per-line cap. Markdown table rows are exempt from the cap:
+      # prettier pads them and a wide row is a table, not a rule buried in a
+      # paragraph.
+      #
+      # Runs before install and regardless of docs_only — a docs-only PR is
+      # exactly how this file grows.
+      - name: Budget CLAUDE.md
+        env:
+          BUDGET: ${{ inputs.claude_md_budget }}
+        run: |
+          [ -f CLAUDE.md ] || exit 0
+          if [ -z "$BUDGET" ]; then
+            echo "No claude_md_budget passed; CLAUDE.md is not budgeted here."
+            exit 0
+          fi
+          case "$BUDGET" in
+            ''|*[!0-9]*)
+              echo "::error::claude_md_budget must be a number of bytes, got '$BUDGET'."
+              exit 1
+              ;;
+          esac
+          MAX_LINE=400
+          fail=
+          size=$(wc -c < CLAUDE.md | tr -d ' ')
+          if [ "$size" -gt "$BUDGET" ]; then
+            echo "::error file=CLAUDE.md::CLAUDE.md is $size bytes, $((size - BUDGET)) over its $BUDGET-byte budget. Cut a rule to one sentence and link the rest, or delete what shared/agents/** already says (ops#1045)."
+            fail=1
+          fi
+          over=$(awk -v m="$MAX_LINE" 'length > m && $0 !~ /^\|/ { printf "%s ", NR }' CLAUDE.md)
+          if [ -n "$over" ]; then
+            echo "::error file=CLAUDE.md::lines over $MAX_LINE chars: ${over}- a rule buried in the paragraph defending it. State it once; move the reasoning to docs/."
+            fail=1
+          fi
+          # One home per rule (ops#1286): a CLAUDE.md that restates a fleet
+          # rule drifts from it — chrisgriffin.io#1503 lost five rounds to a
+          # branch prefix its CLAUDE.md set. RULES is repo/single-source.json,
+          # inline because this runs in the caller's checkout;
+          # shared/test/conventions-single-source.test.js fails when they drift.
+          node --input-type=module - <<'JS' || fail=1
+          import { readFileSync } from "node:fs"
+          const RULES = [{"name":"dates are Pacific","home":"shared/agents/conventions.md","pattern":"America\\/Los_Angeles","flags":""},{"name":"GitHub comments use plain refs, never a closing keyword","home":"shared/agents/conventions.md","pattern":"closes\\/fixes\\/resolves|plain `#N`","flags":""},{"name":"every PR body closes its issue by keyword","home":"shared/agents/conventions.md","pattern":"Fixes #N|keyword against a bare|closes nothing","flags":""},{"name":"the closing-keyword rule's machine PRs are listed once","home":"shared/agents/conventions.md","pattern":"sync-conflict PRs|`figma-sync/` head","flags":""},{"name":"commits are Conventional Commits","home":"shared/agents/conventions.md","pattern":"Conventional Commits","flags":""},{"name":"board work is claimed on the issue first","home":"shared/agents/conventions.md","pattern":"claimed-by <session kind>|younger than 4 hours","flags":""},{"name":"never force-push","home":"shared/agents/conventions.md","pattern":"force-push|push --force","flags":"i"},{"name":"never skip a hook","home":"shared/agents/conventions.md","pattern":"no-verify","flags":""},{"name":"never auto-merge","home":"shared/agents/conventions.md","pattern":"auto-merge","flags":"i"},{"name":"no destructive git","home":"shared/agents/conventions.md","pattern":"reset --hard","flags":""},{"name":"findings: blocking or not","home":"shared/agents/conventions.md","pattern":"can't or shouldn't fix|\\*\\*Non-blocking\\*\\*: typos","flags":""},{"name":"a restatement is blocking","home":"shared/agents/conventions.md","pattern":"restates where it already has a home","flags":""},{"name":"a PR opens ready for review","home":"shared/agents/conventions.md","pattern":"never draft|never as a draft","flags":"i"},{"name":"a branch is the Spec Kit branch; no repo sets its own prefix","home":"shared/agents/build.md","pattern":"Branch prefixes|`(?:feat|fix|claude)/(?:`|<)","flags":""},{"name":"every work request starts as a spec","home":"shared/agents/build.md","pattern":"[Ee]very work request (?:goes through|runs|starts as)","flags":""},{"name":"a Done means line is marked **Runnable:**","home":"shared/agents/issue-filing.md","pattern":"command plus (?:its |an )?expected result","flags":""},{"name":"a Slack reference links what the run read","home":"shared/agents/conventions.md","pattern":"[Ll]ink what you read|never a bare `#N`|named without a link|named as a link from memory","flags":""},{"name":"a Routine reaches GitHub by repo-scoped REST","home":"shared/agents/conventions.md","pattern":"search/\\*.{0,40}403|host actually has|CLI is (?:\\*\\*)?not installed","flags":""},{"name":"Fable-plan-required never pairs with Ready in one pass","home":"shared/agents/routing.md","pattern":"Fable-plan-required` (?:and|with) `Status=Ready` in the same pass","flags":""}]
+          const text = readFileSync("CLAUDE.md", "utf8").replace(/\s+/g, " ")
+          const hits = RULES.filter(r => new RegExp(r.pattern, r.flags).test(text))
+          for (const r of hits)
+            console.log(`::error file=CLAUDE.md::restates "${r.name}", whose one home is chrisgriffin/ops ${r.home}. Replace it with a pointer (ops#1286).`)
+          process.exitCode = hits.length ? 1 : 0
+          JS
+          [ -z "$fail" ] || exit 1
+          echo "CLAUDE.md $size/$BUDGET bytes, lines within $MAX_LINE."
+
+      # Every target's docs/ follows one standard (ops#1074): the templates
+      # in ops's shared/docs/, copied in by repo/sync-docs.mjs. A fixed
+      # block is the same words in every repo and is compared by hash; a slot
+      # is the repo's own and only has to be filled. Every ADR has the fleet
+      # header, every doc a lower-case name and one title, and nothing dated
+      # (a generated report, a one-off audit) lives under docs/.
+      #
+      # Inline for the same reason as the budget: this runs in the CALLER's
+      # checkout and cannot read ops. MANIFEST is `sync-docs.mjs --manifest`,
+      # and ops's repo/test/docs-standard.test.js fails when it drifts from
+      # the templates. Which docs a repo owes is the caller's `docs_owed`
+      # input; a caller passing none owes no templated doc but is held to the
+      # rest.
+      - name: Check docs/
+        env:
+          EVENT: ${{ github.event_name }}
+          OWED: ${{ inputs.docs_owed }}
+        run: |
+          for doc in $OWED; do
+            case "$doc" in
+              adr-index|architecture|releasing|testing|pr-form) ;;
+              *)
+                echo "::error::docs_owed names '$doc', which is not a fleet doc template (adr-index architecture releasing testing pr-form)."
+                exit 1
+                ;;
+            esac
+          done
+          node --input-type=module - <<'JS'
+          import { execFileSync } from "node:child_process"
+          import { createHash } from "node:crypto"
+          import { existsSync, readdirSync, readFileSync } from "node:fs"
+          import { join } from "node:path"
+          const MANIFEST = {"adr-index":{"path":"docs/adr/README.md","title":"# Decision records","skeleton":"83188116ac83cb426aae7225ad8a05e437e9ef7cfe4d6f7e7c45e4af16189707","blocks":[["fleet","intro","8b16d790f3b19b83ed921010d4a11da01bc4bca4d12e15e2312f614dd46692d9"],["slot","records"],["fleet","fleet-decisions","c7a35353325bb36aa52f835c9e00e0973dc2b430ff324a8b9dc55c4e5323580d"]]},"architecture":{"path":"docs/architecture.md","title":"# Architecture","skeleton":"46799f788419bcb34b9a8dca6b3949e5c00c63a5fd488ce5947b3de2cb2f30ad","blocks":[["fleet","intro","038515c138a2c2f6b20088871fa1286025c5136cda16522b445087c39b19bdd2"],["slot","what"],["slot","how"],["slot","connects"],["slot","running"],["slot","next"]]},"releasing":{"path":"docs/releasing.md","title":"# Releasing","skeleton":"03dd0a7239d5716b94b50311683c70cfd8dbb4d18871f00fe17c1b15d8c9e697","blocks":[["slot","summary"],["fleet","flow","94e03a28912ecc7bc723fac6cb81b089d7752da3ed7b36a802edbc1e66d7dc9b"],["slot","artifact"],["slot","manual"]]},"testing":{"path":"docs/testing.md","title":"# Testing","skeleton":"cc3d85c0ef85eec7a4ad5322e66803c88c5479937c8ee8cbb3451d12da494c82","blocks":[["slot","summary"],["fleet","gate","8c804ede6908ee44dc789519913da0a545c62f77102394c1fe3a3374d39a8f23"],["slot","commands"],["slot","layers"],["slot","adding"]]},"pr-form":{"source":"plugins/harness/hooks/pr-form.mjs","stale":".claude/hooks/pr-form.mjs","wire":"in=$(cat); case \"$in\" in *\"gh pr \"*) ;; *) exit 0;; esac; d=$(mktemp -d) && [ -d \"$d\" ] && d=$(cd \"$d\" && pwd -P) && [ -n \"$d\" ] || { echo \"could not make a temp dir for ops develop plugins/harness/hooks/pr-form.mjs; the PR loop gate stands behind it\" >&2; exit 0; }; f=\"$d/pr-form.mjs\"; if gh api \"repos/chrisgriffin/ops/contents/plugins/harness/hooks/pr-form.mjs?ref=develop\" -H \"Accept: application/vnd.github.raw+json\" >\"$f\" 2>/dev/null; then printf %s \"$in\" | node \"$f\"; s=$?; else echo \"could not fetch ops develop plugins/harness/hooks/pr-form.mjs; the PR loop gate stands behind it\" >&2; s=0; fi; rm -rf \"$d\"; exit $s"}}
+          const errors = []
+          const fail = (file, msg) => errors.push(`::error file=${file}::${msg}`)
+          const read = f => readFileSync(f, "utf8").replace(/\r\n/g, "\n")
+          const hash = s => createHash("sha256").update(s.trim()).digest("hex")
+          const BLOCK = /<!-- (fleet|slot):([a-z-]+) -->\n([\s\S]*?)\n<!-- \/\1:\2 -->/g
+          const SYNC = "run ops's repo/sync-docs.mjs against this checkout"
+          // Frontmatter and fenced code are not prose: skip both.
+          const split = text => {
+            const m = text.match(/^---\n([\s\S]*?)\n---\n/)
+            const front = {}
+            for (const l of (m ? m[1] : "").split("\n")) {
+              const kv = l.match(/^([\w-]+):\s*(.*)$/)
+              if (kv) front[kv[1]] = kv[2].replace(/^["']|["']$/g, "")
+            }
+            let fenced = false
+            const lines = (m ? text.slice(m[0].length) : text).split("\n").filter(l => {
+              if (/^\s*(```|~~~)/.test(l)) return (fenced = !fenced), false
+              return !fenced
+            })
+            return { front: m ? front : null, lines }
+          }
+          const walk = dir =>
+            readdirSync(dir, { withFileTypes: true }).flatMap(e =>
+              e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)],
+            )
+          const files = existsSync("docs") ? walk("docs") : []
+
+          for (const doc of (process.env.OWED || "").split(" ").filter(Boolean)) {
+            const t = MANIFEST[doc]
+            if (t.wire) {
+              // A wired hook (ops#1444): .claude/settings.json runs ops's source
+              // from `develop` on a `gh pr` call; no copy of it lives here.
+              let runs = false
+              try {
+                const pre = JSON.parse(read(".claude/settings.json")).hooks?.PreToolUse || []
+                runs = pre.some(h => h.matcher === "Bash" && (h.hooks || []).some(x => x.command === t.wire))
+              } catch {}
+              if (!runs)
+                fail(".claude/settings.json", `does not run ops's ${t.source} from develop on Bash (PreToolUse) — ${SYNC}`)
+              if (existsSync(t.stale))
+                fail(t.stale, `a vendored copy of ops's ${t.source}; the hook runs from ops develop now and nothing is copied here — ${SYNC}`)
+              continue
+            }
+            if (!existsSync(t.path)) {
+              fail(t.path, `missing — this repo owes docs/${doc === "adr-index" ? "adr/README" : doc}.md; ${SYNC}, then fill its slots`)
+              continue
+            }
+            const text = read(t.path)
+            if (text.split("\n")[0] !== t.title)
+              fail(t.path, `the first line must be the template title \`${t.title}\` — ${SYNC}`)
+            const have = [...text.matchAll(BLOCK)]
+            const got = have.map(m => `${m[1]}:${m[2]}`).join(" ")
+            const want = t.blocks.map(b => `${b[0]}:${b[1]}`).join(" ")
+            if (got !== want)
+              fail(t.path, `blocks are [${got}], the template's are [${want}] — ${SYNC}`)
+            for (const m of have) {
+              const b = t.blocks.find(x => x[0] === m[1] && x[1] === m[2])
+              if (!b) continue
+              if (b[0] === "fleet" && hash(m[3]) !== b[2])
+                fail(t.path, `fixed block fleet:${b[1]} differs from the fleet template; its words are never edited in a repo — ${SYNC}`)
+              if (b[0] === "slot" && (!m[3].trim() || m[3].trim().startsWith("TODO(slot):")))
+                fail(t.path, `slot:${b[1]} is not filled in — replace its TODO(slot) prompt with this repo's facts`)
+            }
+            // Everything outside a slot is the template's, headings between
+            // blocks included: compared with every slot emptied.
+            const skeleton = text
+              .replace(BLOCK, (m, kind, id, body) => (kind === "slot" ? m.replace(body, "") : m))
+              .split("\n").map(l => l.trim()).filter(Boolean).join("\n")
+            if (text.includes("<!-- unsorted -->"))
+              fail(t.path, "an unsorted block holds text sync-docs.mjs could not place — fold it into a slot, or delete it")
+            else if (got === want && hash(skeleton) !== t.skeleton)
+              fail(t.path, `text outside the slots differs from the template (a heading or line between blocks) — ${SYNC}`)
+          }
+
+          for (const f of files) {
+            const rel = f.split("/").slice(1).join("/")
+            if (/\d{4}-\d{2}-\d{2}/.test(rel))
+              fail(f, "a dated file lives under docs/ — generated output and one-off reports go outside docs/ (gitignored if regenerable), a live doc drops the date from its name")
+            if (!f.endsWith(".md")) continue
+            const name = f.split("/").pop()
+            const adr = f.startsWith("docs/adr/") && name !== "README.md"
+            const { front, lines } = split(read(f))
+            if (adr) {
+              const n = name.match(/^ADR-(\d{3})-[a-z0-9]+(-[a-z0-9]+)*\.md$/)
+              if (!n) {
+                fail(f, "an ADR is named ADR-NNN-<kebab-slug>.md")
+                continue
+              }
+              if (!front) fail(f, "an ADR opens with YAML frontmatter carrying status and date")
+              else {
+                if (!["proposed", "accepted", "superseded", "deprecated"].includes(front.status))
+                  fail(f, "frontmatter status is one of proposed, accepted, superseded, deprecated")
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(front.date || ""))
+                  fail(f, "frontmatter date is YYYY-MM-DD")
+                if (front.status === "superseded" && !/^ADR-\d{3}$/.test(front["superseded-by"] || ""))
+                  fail(f, "a superseded ADR names its successor: superseded-by: ADR-NNN (no successor ADR means deprecated)")
+              }
+              const first = lines.find(l => l.trim())
+              if (!first || !first.startsWith(`# ADR-${n[1]}: `))
+                fail(f, `the title is \`# ADR-${n[1]}: <title>\`, its number matching the filename`)
+              const h2 = lines.map(l => (l.match(/^## (Context|Decision|Consequences)( — .+)?$/) || [])[1])
+              const at = ["Context", "Decision", "Consequences"].map(h => h2.indexOf(h))
+              if (at.includes(-1) || at[0] > at[1] || at[1] > at[2])
+                fail(f, "an ADR has the sections ## Context, ## Decision and ## Consequences (each may take a ` — subtitle`), in that order, others between them allowed")
+              continue
+            }
+            if (name !== "README.md" && !/^[a-z0-9]+(-[a-z0-9]+)*\.md$/.test(name))
+              fail(f, "a doc's filename is lower-case kebab-case")
+            const first = lines.find(l => l.trim())
+            if (!first || !first.startsWith("# "))
+              fail(f, "a doc opens with its one `# ` title")
+            if (lines.filter(l => l.startsWith("# ")).length > 1)
+              fail(f, "a doc has exactly one `# ` title; the rest are `##` and below")
+            const prov = lines.find(l => /^(Moved|Ported|Mirrored|Copied) (here|from|to)\b/.test(l))
+            if (prov)
+              fail(f, `"${prov.slice(0, 60)}" is a provenance note — where text came from is git history, not doc content`)
+          }
+
+          // ops#1088: docs/architecture.md is living documentation. A PR that
+          // adds, removes or renames a directory changes what that doc
+          // describes, so it changes the doc too. Tests, fixtures, docs, public
+          // assets (ops#1360), specs, recaps and dot-directories (bar .github)
+          // are not structure.
+          // Pull requests only: `HEAD^1` is the base there (fetch-depth 2).
+          if (process.env.EVENT === "pull_request" && (process.env.OWED || "").split(" ").includes("architecture")) {
+            const git = (...a) => execFileSync("git", a, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
+            let base = ""
+            try { base = git("rev-parse", "--verify", "-q", "HEAD^1").trim() } catch {}
+            if (base) {
+              const SKIP = /(^|\/)(__tests__|__snapshots__|tests?|fixtures|docs|specs|recaps|public|node_modules)(\/|$)|(^|\/)\.(?!github(\/|$))/
+              const dirs = ref => new Set(git("ls-tree", "-r", "-d", "--name-only", ref).split("\n").filter(d => d && !SKIP.test(d)))
+              const before = dirs(base)
+              const after = dirs("HEAD")
+              const added = [...after].filter(d => !before.has(d))
+              const removed = [...before].filter(d => !after.has(d))
+              const touched = git("diff", "--name-only", base, "HEAD").split("\n").includes("docs/architecture.md")
+              if ((added.length || removed.length) && !touched) {
+                const what = [added.length && `added: ${added.join(", ")}`, removed.length && `removed: ${removed.join(", ")}`].filter(Boolean).join("; ")
+                fail("docs/architecture.md", `this PR changes the directory structure (${what}) — update docs/architecture.md to match in the same PR`)
+              }
+            }
+          }
+
+          for (const e of errors) console.log(e)
+          if (errors.length) process.exit(1)
+          console.log(`docs/ matches the fleet standard (${files.length} files; owes: ${process.env.OWED || "nothing templated"}).`)
+          JS
+
+      # Docs-only = a PR whose every changed path matches one of the caller's
+      # `docs_only_paths` globs. Git does the matching (`docs/**` nested,
+      # `*.md` root only). Anything unproven, a failed diff included, leaves
+      # docs_only=false and the full gate runs. A step-level skip, so the job
+      # still reports its check (ops#976).
+      #
+      # A caller lists only paths nothing in its tests, build or `run` reads;
+      # a repo whose tests read docs/ or README, or whose gate already takes
+      # seconds, passes nothing.
+      - name: Scope the change
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          DOCS_ONLY_PATHS: ${{ inputs.docs_only_paths }}
+        run: |
+          docs_only=false
+          set -f
+          if [ "$EVENT" = pull_request ] && [ -n "$DOCS_ONLY_PATHS" ]; then
+            exclude=()
+            for p in $DOCS_ONLY_PATHS; do exclude+=(":(exclude,glob)$p"); done
+            if all=$(git diff --name-only HEAD^1 HEAD) && [ -n "$all" ] &&
+               rest=$(git diff --name-only HEAD^1 HEAD -- . "${exclude[@]}") &&
+               [ -z "$rest" ]; then
+              docs_only=true
+            fi
+          fi
+          echo "docs_only=$docs_only" | tee -a "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: npm
+
+      - name: Install dependencies
+        run: ${{ inputs.install_command }}
+        env:
+          # Targets that depend on @chrisgriffin/* from GitHub Packages need
+          # this to install at all; harmless where nothing private is pulled.
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN || secrets.GITHUB_TOKEN }}
+
+      # The repo's own prettier and .prettierignore; a repo without prettier
+      # has nothing to check here.
+      - name: Prettier-check the docs
+        if: steps.scope.outputs.docs_only == 'true'
+        run: |
+          [ -x node_modules/.bin/prettier ] || { echo "No prettier installed; nothing to check."; exit 0; }
+          git diff --name-only --diff-filter=d -z HEAD^1 HEAD |
+            xargs -0 -r npx --no-install prettier --check --ignore-unknown --no-error-on-unmatched-pattern
+
+      - name: Run the repo's gate
+        if: steps.scope.outputs.docs_only != 'true'
+        run: ${{ inputs.run }}

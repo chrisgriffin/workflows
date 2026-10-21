@@ -1,0 +1,683 @@
+name: (reusable) Release PR
+
+# Called via `workflow_call` from every target's thin release-pr.yml trigger
+# stub (2026-08-20, ops#439's release-pr unification — Chris: "identical
+# where it can, no bespoke bullshit"). On every push to develop, opens (or
+# updates) a stable `release/next` PR targeting main. The version bump
+# comes from conventional-commit history: feat → minor, fix/perf → patch,
+# BREAKING CHANGE → major (minor below 1.0.0), anything else (chore/docs/
+# style/ci/refactor/test/build) → patch. A release PR is always opened when develop is ahead
+# of main — there is no "no release this time" case.
+#
+# Fully self-contained: no target repo commits a changelog-preset config,
+# a version-recommend npm script, or any conventional-changelog
+# devDependency. This workflow `npm install --prefix`s the conventional-
+# changelog tooling into its own ephemeral /tmp/rp-tools prefix (a REAL
+# node_modules/, unlike writing a config file to bare /tmp — a config
+# there has nothing for its own `import` to resolve against, which is not
+# hypothetical: it broke every release PR before this comment was fixed,
+# ops#439) and writes its ephemeral changelog config into that same
+# prefix, so the only thing a target repo owns is package.json's own
+# version field and CHANGELOG.md.
+#
+# `extra_build_command`/`extra_add_paths`: the one legitimate per-repo
+# knob — a target whose release commit must also regenerate a build
+# artifact (chrisgriffin.io's résumé PDF) passes a single npm script name
+# here instead of carrying its own copy of this whole file. Every other
+# caller passes neither and this step is a no-op.
+#
+# Secrets:
+#   RELEASE_PR_TOKEN   (optional) fine-grained PAT / GitHub App token used to
+#                      push release/next and open the PR. Must NOT be the
+#                      built-in GITHUB_TOKEN: GitHub suppresses workflow runs
+#                      for events created by GITHUB_TOKEN (recursion guard), so
+#                      a token-created release PR never triggers other CI
+#                      checks on its own and sits unmergeable until checks are
+#                      kicked by hand. A PAT/App token is a different actor,
+#                      so those checks fire automatically. Falls back to
+#                      GITHUB_TOKEN when unset (legacy behaviour — checks must
+#                      then be triggered manually).
+
+on:
+  workflow_call:
+    inputs:
+      extra_build_command:
+        description: Optional npm script (or shell command) run after the version bump, before committing — for a repo whose release commit must also regenerate a build artifact.
+        type: string
+        required: false
+        default: ""
+      extra_add_paths:
+        description: Extra paths to `git add` after extra_build_command runs (space-separated). Ignored if extra_build_command is empty.
+        type: string
+        required: false
+        default: ""
+      extra_build_gate_command:
+        description: >-
+          Optional command run BEFORE the install, deciding whether
+          extra_build_command is worth running at all. Exit 0 = needed; any
+          non-zero exit = skip both the install and the hook. Ignored when
+          extra_build_command is empty. Must not need node_modules - it runs
+          before npm ci, which is the entire point.
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+  pull-requests: write
+  # The release PR's Evaluator status, posted by the last step (ops#1372).
+  # Every caller's stub grants it; a reusable asking for more fails at start.
+  statuses: write
+
+# No group before this fix: a burst of merges to develop queued one full run
+# per push, each paying the same ~2-4min npm ci + changelog-tooling install
+# even though only the LAST push's state ends up in release/next — the
+# earlier runs' work was pure waste the moment a newer one landed. Keyed on
+# the caller's own repo since this workflow is shared across every target.
+concurrency:
+  group: release-pr-${{ github.repository }}
+  cancel-in-progress: true
+
+jobs:
+  release-pr:
+    # No job-level `if` (ops#1372). `[skip-release]` used to skip here,
+    # before a runner was allocated (ops#649); the job now starts on such a
+    # push to run the sweep dispatch, which was its own billed job (Merge
+    # sweep) on the same push, and the rule moved into the in-sync step.
+    runs-on: ubuntu-latest
+    # Every successful run finishes in under 3 minutes, including
+    # chrisgriffin.io's `extra_build_command` PDF build. Without this, a hung
+    # step runs to GitHub's 6-hour job ceiling before it is force-cancelled:
+    # five such runs burned 1,824 billed minutes in one 48-hour window — 56% of
+    # the whole fleet's Actions usage — all stalled in `Calculate next version`.
+    timeout-minutes: 10
+    steps:
+      # A merge into develop can put open PRs in conflict: start ops's sweep
+      # now (ops#1268). It was its own job, Merge sweep, a billed minute per
+      # push for one API call; it rides this job instead (ops#1372). Push
+      # only: a hand re-run of the release PR is not a merge.
+      - uses: chrisgriffin/workflows/.github/actions/dispatch-sweep@develop
+        if: github.event_name == 'push'
+        with:
+          token: ${{ secrets.OPS_GH_TOKEN || secrets.TARGET_TOKEN }}
+
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: develop
+          # Persisted as the git credential for the later `git push`, so the
+          # push (and thus the PR) is authored by RELEASE_PR_TOKEN's actor —
+          # not GITHUB_TOKEN, whose events never trigger downstream checks.
+          token: ${{ secrets.RELEASE_PR_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Skip if there is nothing releasable ahead of main
+        id: in-sync
+        env:
+          # The job-level skip until ops#1372. sync-main-to-develop writes
+          # [skip-release] into its merge-back commit (ops#649), and the push
+          # must be a SINGLE commit (ops#650): head_commit is only the last
+          # commit of a push, so real work ending in a sync merge would
+          # otherwise go unreleased. "Exactly one" is "no second commit":
+          # expressions have no length(), and an unknown function fails
+          # workflow validation for every target at once.
+          SKIP_RELEASE: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[skip-release]') && github.event.commits != null && github.event.commits[1] == null }}
+        run: |
+          if [ "$SKIP_RELEASE" = "true" ]; then
+            echo "A single [skip-release] commit (a sync merge-back) — no release built."
+            echo "skip=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          git fetch origin main --tags
+
+          AHEAD=$(git rev-list --count origin/main..origin/develop)
+          if [ "$AHEAD" = "0" ]; then
+            echo "develop has no commits ahead of main — nothing to release."
+            echo "skip=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # A MERGE-BACK IS NOT A RELEASE (ops#649).
+          #
+          # sync-main-to-develop merges main into develop after every release,
+          # so develop legitimately sits "ahead" by a merge commit whose whole
+          # content is already released. Counting commits alone treats that as
+          # releasable: token-atlas cut a v0.5.1 whose entire body was
+          # "- #100 chore: sync main to develop".
+          #
+          # `--no-merges` is what separates them. A merge-back contributes only
+          # a merge commit — its parents are already reachable from main — so
+          # if every commit ahead is a merge, there is no new work here.
+          #
+          # This is the robust half of the fix. The `[skip-release]` marker
+          # below is the cheap half, and it alone is not enough: the marker
+          # rides on the sync's own commit, and when the sync goes through a PR
+          # (the refused-push fallback) GitHub's merge commit reads "Merge pull
+          # request #N ..." and the marker never appears in head_commit.message.
+          REAL=$(git rev-list --count --no-merges origin/main..origin/develop)
+          if [ "$REAL" = "0" ]; then
+            echo "develop is $AHEAD commit(s) ahead of main, but all are merges — nothing new to release."
+            git log --oneline origin/main..origin/develop
+            echo "skip=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "develop is $AHEAD commit(s) ahead of main, $REAL of them real work."
+          echo "skip=false" >> $GITHUB_OUTPUT
+
+      # ops#883: the install below exists only to serve extra_build_command,
+      # and chrisgriffin.io's often decides it has nothing to do - after the
+      # job already paid ~31s of `npm ci` to find that out. A caller can now
+      # answer first, in a command cheap enough to run before any install.
+      #
+      # This step can never fail the job. A broken gate must not block a
+      # release, so any non-zero exit means "skip the optional build", which
+      # is the safe direction: the release PR still opens, just without the
+      # artifact refresh. When the gate is unset the output is empty and
+      # every condition below reads exactly as it did before.
+      - id: extra-build-gate
+        if: steps.in-sync.outputs.skip != 'true' && inputs.extra_build_gate_command != '' && inputs.extra_build_command != ''
+        env:
+          GATE: ${{ inputs.extra_build_gate_command }}
+        run: |
+          set +e
+          eval "$GATE"
+          CODE=$?
+          set -e
+          if [ "$CODE" = 0 ]; then
+            echo "gate: the extra build is needed"
+            echo "needed=true" >> $GITHUB_OUTPUT
+          else
+            echo "gate: nothing to rebuild (exit $CODE) - skipping install and hook"
+            echo "needed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - uses: actions/setup-node@v5
+        if: steps.in-sync.outputs.skip != 'true'
+        with:
+          node-version: "22"
+          # Cache only when there's an install below to speed up — same
+          # conditional-cache pattern as _reusable-create-github-release.yml.
+          cache: ${{ inputs.extra_build_command != '' && 'npm' || '' }}
+          # WRITES THE .npmrc THAT `npm ci` BELOW NEEDS (ops#652). Without it
+          # the install is anonymous, and a caller depending on a GitHub
+          # Packages module gets 401 Unauthorized. chrisgriffin.io is that
+          # caller — it pulls @chrisgriffin/design-drift — and its release-pr
+          # failed on every run from 2026-08-24 until this, six consecutively,
+          # producing no release PR and no red check anywhere a human looks.
+          #
+          # Set unconditionally rather than behind extra_build_command: it only
+          # writes a config file, costs nothing when no install follows, and a
+          # second conditional here is one more thing to get wrong.
+          registry-url: https://npm.pkg.github.com
+          scope: "@chrisgriffin"
+
+      # The caller repo's own node_modules is read by exactly one thing:
+      # extra_build_command (chrisgriffin.io's PDF build). Every changelog
+      # tool below runs from its own /tmp/rp-tools prefix, and `npm version`
+      # needs no install — so for every caller without a build command this
+      # `npm ci` was 1-3 billed minutes of pure waste on every push to
+      # develop, fleet-wide (ops#571).
+      # `!= 'false'` rather than `== 'true'`: a skipped or unset gate yields an
+      # empty string, which must mean "install as before" for the five callers
+      # that set no gate at all.
+      - if: steps.in-sync.outputs.skip != 'true' && inputs.extra_build_command != '' && steps.extra-build-gate.outputs.needed != 'false'
+        run: npm ci
+        env:
+          # The token the registry-url above expects (ops#652), and it has to
+          # be the PAT first — GITHUB_TOKEN is not enough (ops#653).
+          #
+          # I shipped `secrets.GITHUB_TOKEN` alone and it moved the failure
+          # from 401 to 403: "Permission installation not allowed to Read
+          # organization package". The job's own token is scoped to the
+          # CALLING repo, so it cannot read a package published from a
+          # different one — chrisgriffin.io installing
+          # @chrisgriffin/design-drift is exactly that shape, and it is the
+          # only caller that installs anything here.
+          #
+          # Same chain the checkout above already uses, for the same reason:
+          # RELEASE_PR_TOKEN is a real PAT with org-wide read. GITHUB_TOKEN
+          # stays last so a caller with no PAT and no private deps still
+          # works.
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN || secrets.RELEASE_PR_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        if: steps.in-sync.outputs.skip != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Install the changelog tooling into its own resolvable prefix
+        if: steps.in-sync.outputs.skip != 'true'
+        # `npm install --prefix` creates a REAL node_modules/ under that
+        # prefix — unlike writing a config file to bare /tmp, a config file
+        # placed in THIS prefix can `import` conventional-changelog-
+        # conventionalcommits and have Node's normal upward module
+        # resolution actually find it (found live, ops#439: a config at
+        # bare /tmp cannot resolve any import at all — every release PR
+        # would have silently never opened). Pinned versions, installed
+        # once here rather than a separate `npx --yes` per call.
+        run: |
+          mkdir -p /tmp/rp-tools
+          npm install --no-save --prefix /tmp/rp-tools \
+            conventional-changelog-cli@5 \
+            conventional-changelog-conventionalcommits@8 \
+            prettier@3
+
+      - name: Write the ephemeral changelog config
+        if: steps.in-sync.outputs.skip != 'true'
+        # Never committed — exists only for this job's own conventional-
+        # changelog-cli invocations below. Identical across every target on
+        # purpose: the "drop non-keyword issue mentions" transform and the
+        # Pacific-time date formatter both matter everywhere an ops-managed
+        # Night Shift/PM loop can post a recap or STATE.md update that
+        # mentions an issue number without a real closing keyword — not
+        # just chrisgriffin.io, where the gap was first found. Written into
+        # the tool prefix (not bare /tmp) so its own import resolves.
+        run: |
+          cat > /tmp/rp-tools/changelog-preset.config.mjs <<'EOF'
+          import createPreset from "conventional-changelog-conventionalcommits"
+
+          const ptDateFormatter = new Intl.DateTimeFormat("en-CA", {
+            timeZone: "America/Los_Angeles",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+          })
+          function formatDatePT(date = new Date()) {
+            return ptDateFormatter.format(new Date(date))
+          }
+
+          const preset = await createPreset({ types: [
+            { type: "feat", section: "Features" },
+            { type: "fix", section: "Bug Fixes" },
+            { type: "perf", section: "Performance Improvements" },
+            { type: "revert", section: "Reverts" },
+            { type: "docs", section: "Documentation" },
+            { type: "style", section: "Styles", hidden: true },
+            { type: "chore", section: "Miscellaneous Chores", hidden: true },
+            { type: "refactor", section: "Code Refactoring" },
+            { type: "test", section: "Tests", hidden: true },
+            { type: "build", section: "Build System" },
+            { type: "ci", section: "Continuous Integration", hidden: true },
+          ] })
+
+          // GitHub auto-closes any issue that follows a closing keyword
+          // (close/closes/closed, fix/fixes/fixed, resolve/resolves/resolved) in
+          // a commit message or PR body once it lands on the default branch
+          // (`main`). conventional-changelog, however, renders EVERY issue
+          // reference it parses — including bare `#N` mentions with no keyword —
+          // under a single "closes #N" clause. Because every push to `develop`
+          // flows to `main` through the rolling release PR, those fabricated
+          // "closes #N" reach the default branch and close issues that were
+          // only *mentioned* — e.g. in Night Shift recaps, STATE.md updates, or
+          // the "Pull requests in this release" list this same workflow appends.
+          //
+          // Restore GitHub's own semantics: a closing keyword closes the issue;
+          // a plain mention does not. Wrap the preset's writer transform and
+          // drop every reference that wasn't introduced by an explicit closing
+          // keyword. The parser sets `action` to the matched keyword for those;
+          // bare mentions have a null `action`.
+          const baseTransform = preset.writer.transform
+          preset.writer.transform = (commit, context) => {
+            const transformed = baseTransform ? baseTransform(commit, context) : commit
+            if (transformed && Array.isArray(transformed.references)) {
+              transformed.references = transformed.references.filter(ref => ref.action)
+            }
+            return transformed
+          }
+
+          // Render version-header dates in Pacific Time, not UTC.
+          // conventional-changelog-writer's default formatDate is
+          // `new Date(d).toISOString().slice(0, 10)` — always UTC — so a
+          // release cut in the evening Pacific (already past midnight UTC)
+          // printed tomorrow's date in CHANGELOG.md and the release PR body.
+          preset.writer.formatDate = formatDatePT
+
+          export default preset
+          EOF
+
+      - name: Calculate next version
+        if: steps.in-sync.outputs.skip != 'true'
+        id: version
+        run: |
+          CURRENT=$(node -p "require('./package.json').version")
+
+          # The conventional-commits bump, read straight from git since the
+          # last release tag (the same boundary the PR list below uses):
+          # a `type!:` subject or a BREAKING CHANGE footer is major (minor
+          # below 1.0.0), `feat` is minor, anything else is patch.
+          #
+          # A bump tool used to decide this, and on a long history it printed
+          # its answer and then never exited (ops#451). The 120s timeout that
+          # kept releases moving billed those 120s on every push to develop in
+          # chrisgriffin.io, design-drift and ops — ~170 min/week (Actions
+          # audit 2026-09-13). grep without -q drains git's output, so nothing
+          # here can wedge on a pipe the same way.
+          BASE=$(git describe --tags --match 'v[0-9]*' --abbrev=0 HEAD 2>/dev/null || true)
+          RANGE="${BASE:+$BASE..}HEAD"
+          if git log --format=%s "$RANGE" | grep -E '^[a-z]+(\([^)]*\))?!:' >/dev/null ||
+            git log --format=%b "$RANGE" | grep -E '^BREAKING[ -]CHANGE:' >/dev/null; then
+            BUMP=major
+          elif git log --format=%s "$RANGE" | grep -E '^feat(\([^)]*\))?:' >/dev/null; then
+            BUMP=minor
+          else
+            BUMP=patch
+          fi
+
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+          # Below 1.0.0 a breaking change is a minor, as release-please's
+          # bump-minor-pre-major: 1.0.0 is Chris's call, never a footer's
+          # (ops#1457 — token-atlas#377 opened as v1.0.0 from 0.25.1).
+          if [ "$BUMP" = major ] && [ "$MAJOR" = 0 ]; then BUMP=minor; fi
+          case "$BUMP" in
+            major) NEXT="$((MAJOR + 1)).0.0" ;;
+            minor) NEXT="$MAJOR.$((MINOR + 1)).0" ;;
+            *)     NEXT="$MAJOR.$MINOR.$((PATCH + 1))" ;;
+          esac
+
+          echo "Bump: $BUMP — $CURRENT → $NEXT"
+
+          # Guard against the race where another release shipped during this run.
+          # If v$NEXT is already tagged, opening a PR for it would create a
+          # CHANGELOG.md / package.json conflict against main.
+          git fetch --tags --force origin >/dev/null 2>&1 || true
+          if git rev-parse --verify --quiet "refs/tags/v$NEXT" >/dev/null; then
+            echo "Tag v$NEXT already exists — another release shipped during this run. Skipping."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "next=$NEXT" >> $GITHUB_OUTPUT
+            # Stable branch name — the same PR is reused across version bumps
+            # (patch → minor, etc.) instead of closing and recreating.
+            echo "branch=release/next" >> $GITHUB_OUTPUT
+          fi
+
+      # Return an open, ready release PR to draft BEFORE the force-push below,
+      # so the push's synchronize already sees a draft: the build checks skip
+      # a draft release PR and run when Chris marks it ready, so the merge
+      # button only ever sits on a tree its gate ran on (ops#1434). A new
+      # release PR opens as a draft (`gh pr create --draft` below). A failed
+      # read or conversion stops the run here, before anything is pushed.
+      - name: Return the release PR to draft
+        if: steps.in-sync.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN || secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ steps.version.outputs.branch }}
+        run: |
+          set -euo pipefail
+          READY=$(gh pr list --head "$BRANCH" --base main --state open \
+            --json number,isDraft --jq '.[] | select(.isDraft == false) | .number')
+          for n in $READY; do
+            gh pr ready "$n" --undo
+            echo "Release PR #$n returned to draft; marking it ready runs the gate."
+          done
+
+      - name: Build release branch
+        id: build
+        if: steps.in-sync.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
+        env:
+          NEXT: ${{ steps.version.outputs.next }}
+          BRANCH: ${{ steps.version.outputs.branch }}
+          EXTRA_BUILD_COMMAND: ${{ inputs.extra_build_command }}
+          EXTRA_BUILD_NEEDED: ${{ steps.extra-build-gate.outputs.needed }}
+          EXTRA_PATHS: ${{ inputs.extra_add_paths }}
+        run: |
+          git checkout -B "$BRANCH"
+
+          npm version "$NEXT" --no-git-tag-version
+
+          # Repo-specific build step, if the caller set one — after the
+          # version bump, before committing, exactly as extra_build_command's
+          # own description promises. A target regenerating a build artifact
+          # (chrisgriffin.io's résumé PDF) needs the bumped package.json
+          # version and a real develop checkout to build against; running
+          # this any earlier would build against the pre-bump state.
+          # ops#883: the gate already said there is nothing to rebuild, and
+          # node_modules was deliberately not installed - running the hook
+          # here would fail on the missing install rather than no-op.
+          if [ -n "$EXTRA_BUILD_COMMAND" ] && [ "$EXTRA_BUILD_NEEDED" != "false" ]; then
+            eval "$EXTRA_BUILD_COMMAND"
+          fi
+
+          # conventional-changelog-cli -i -s prepends straight to the top of
+          # the file, with no idea CHANGELOG.md opens with a "# Changelog"
+          # title + intro line — left alone it shoves that header below the
+          # new entry. Generate just the new entry (-r 1, no -i) and splice
+          # it in immediately before the first "## " version header instead,
+          # leaving the title block untouched. A repo's first release has no
+          # version header to splice before: the entry goes after the title
+          # instead of being dropped (ops#1241).
+          NEW_ENTRY=$(/tmp/rp-tools/node_modules/.bin/conventional-changelog -n /tmp/rp-tools/changelog-preset.config.mjs -r 1)
+          # `###?`, not the `#{2,3}` interval that says the same thing: mawk
+          # 1.3.4 20240123 ignores an interval's upper bound, so a `###` patch
+          # heading never matches and the new entry is silently dropped rather
+          # than spliced. `?` is portable across every awk (ops#921).
+          awk -v new="$NEW_ENTRY" '
+            !done && /^###? \[?v?[0-9]/ { print new; print ""; done=1 }
+            { print }
+            END { if (!done) { print ""; print new } }
+          ' CHANGELOG.md > CHANGELOG.md.new
+          mv CHANGELOG.md.new CHANGELOG.md
+
+          # conventional-changelog-cli's output isn't Prettier-formatted, which
+          # fails a format:check in this repo's own CI on the release PR even
+          # though develop was clean — reformat before committing.
+          /tmp/rp-tools/node_modules/.bin/prettier --write CHANGELOG.md
+
+          git add package.json package-lock.json CHANGELOG.md
+          # shellcheck disable=SC2086 — deliberately unquoted: a space-separated
+          # list of paths, empty and a no-op for every caller but chrisgriffin.io.
+          if [ -n "$EXTRA_PATHS" ]; then
+            git add $EXTRA_PATHS
+          fi
+          git commit -m "chore: release v${NEXT}"
+          git push origin "$BRANCH" --force
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update release PR
+        if: steps.in-sync.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN || secrets.GITHUB_TOKEN }}
+          NEXT: ${{ steps.version.outputs.next }}
+          BRANCH: ${{ steps.version.outputs.branch }}
+        run: |
+          # Any command that ends this step names itself, so a failure here
+          # is never a bare "exit code 1" again (ops#1427).
+          trap 'echo "::error::Create or update release PR failed (exit $?) at line $LINENO: $BASH_COMMAND"' ERR
+          TITLE="chore: release v${NEXT}"
+
+          # --- Collect the work PRs that land in this release ----------------
+          # Everything on develop since the LAST RELEASE TAG is shipping in
+          # this release — the same boundary the CHANGELOG entry above uses,
+          # so the two sections agree (ops#816). `origin/main..origin/develop`
+          # is NOT that boundary: main carries the release squash, so every
+          # work commit since the previous release still looks new from main
+          # and the list repeats PRs that already shipped (design-drift#443
+          # named six of v0.18.0's PRs in the v0.18.1 release). Only release
+          # tags count — `--match 'v[0-9]*'` — because ops also carries
+          # `harness--v*` plugin tags, and an unfiltered describe picked one
+          # of those, moving the boundary past six unreleased PRs. A repo
+          # with no release tag yet falls back to main as the base.
+          #
+          # The repo merges work PRs into develop with merge commits
+          # ("Merge pull request #N from owner/branch"), and some PRs are
+          # squash-merged ("subject (#N)"). Gather both, skip the release PRs
+          # themselves and the back-merges sync-main-to-develop replays onto
+          # develop, and render a linked bullet list so the PRs are both
+          # visible and cross-referenced from the release PR.
+          RANGE_BASE=$(git describe --tags --match 'v[0-9]*' --abbrev=0 origin/develop 2>/dev/null || echo origin/main)
+          echo "PR list range: ${RANGE_BASE}..origin/develop"
+          PR_LIST=""
+          SEEN=" "
+
+          # Every skip says why and returns 0 explicitly. A bare `return`
+          # hands back the status of the last command — here the failed
+          # `[ -z "$num" ]` test — so a repeated PR number returned 1 and
+          # `bash -e` ended the step with no diagnostic (ops#1427).
+          add_pr() {
+            local num="$1"
+            if [ -z "$num" ]; then
+              echo "PR list: skipped an empty PR number"
+              return 0
+            fi
+            case "$SEEN" in *" $num "*)
+              echo "PR list: skipped #$num, already listed"
+              return 0
+              ;;
+            esac
+            SEEN="$SEEN$num "
+            local meta
+            meta=$(gh pr view "$num" --json title,author,headRefName \
+              --jq 'select(.headRefName | startswith("release/") | not) | "\(.title) (@\(.author.login))"' 2>/dev/null) || meta=""
+            # A squash-merged release PR ("chore: release vX (#N)") sits inside
+            # the tag range once the tag is on develop; its head is release/*,
+            # so the jq select above yields nothing for it — skip it. A PR the
+            # token cannot read still gets a bare "- #N" line.
+            if [ -z "$meta" ] && gh pr view "$num" --json headRefName --jq .headRefName 2>/dev/null | grep -q '^release/'; then
+              echo "PR list: skipped #$num, a release PR"
+              return 0
+            fi
+            if [ -n "$meta" ]; then
+              PR_LIST="${PR_LIST}- #${num} ${meta}"$'\n'
+            else
+              PR_LIST="${PR_LIST}- #${num}"$'\n'
+            fi
+          }
+
+          # Merge-commit PRs — subject carries the head branch, so we can drop
+          # the "release/*" back-merges synced from main.
+          while read -r NUM BRANCH_REF; do
+            case "$BRANCH_REF" in release/*)
+              echo "PR list: skipped #$NUM, a back-merge from $BRANCH_REF"
+              continue
+              ;;
+            esac
+            add_pr "$NUM"
+          done < <(git log "${RANGE_BASE}..origin/develop" --merges --format='%s' \
+            | sed -nE 's|^Merge pull request #([0-9]+) from [^/]+/(.*)$|\1 \2|p')
+
+          # Squash-merged PRs — "subject (#N)" on a non-merge commit. Release
+          # PRs target main (never squashed into develop), so these are all
+          # work PRs.
+          while read -r NUM; do
+            add_pr "$NUM"
+          done < <(git log "${RANGE_BASE}..origin/develop" --no-merges --format='%s' \
+            | sed -nE 's/.*\(#([0-9]+)\)$/\1/p')
+
+          # PR body: the latest changelog block, plus the included PRs.
+          BODY=$(/tmp/rp-tools/node_modules/.bin/conventional-changelog -n /tmp/rp-tools/changelog-preset.config.mjs -r 1)
+          if [ -n "$PR_LIST" ]; then
+            BODY="${BODY}"$'\n\n'"## Pull requests in this release"$'\n\n'"${PR_LIST}"
+          fi
+
+          # GitHub hard-rejects a PR body over 65536 characters — `gh pr create`
+          # fails with "Body is too long (maximum is 65536 characters)" and the
+          # step exits 1 having already force-pushed release/next, so the branch
+          # exists with no PR attached. Found live on ops's own first release
+          # (ops#630): `conventional-changelog -r 1` spanned far more than the
+          # 11 commits since the previous tag, and the whole release was blocked
+          # by a body nobody reads in full anyway.
+          #
+          # Truncate rather than fail: the changelog itself is committed on the
+          # branch, so nothing is lost — only this preview is shortened, and it
+          # says so with a link to the file that holds all of it. A release must
+          # not be blocked by the size of its own description.
+          #
+          # 65000, not 65536: the notice below is appended after the cut, and
+          # the margin covers it plus any multi-byte characters the limit counts
+          # differently than `wc -c` does.
+          BODY_LIMIT=65000
+          if [ "$(printf '%s' "$BODY" | wc -c)" -gt "$BODY_LIMIT" ]; then
+            echo "::warning::PR body exceeded ${BODY_LIMIT} chars — truncating the preview; CHANGELOG.md on the branch is complete."
+            BODY="$(printf '%s' "$BODY" | head -c "$BODY_LIMIT")"$'\n\n'"—"$'\n'"_Body truncated at ${BODY_LIMIT} characters. The complete entry is in \`CHANGELOG.md\` on this branch._"
+          fi
+
+          # The branch name is stable (release/next), so the same PR is reused
+          # across version bumps. Update its title and body to match the new
+          # version (and the latest PR list) instead of closing and recreating.
+          find_existing() {
+            gh pr list --head "$BRANCH" --base main --state open \
+              --json number --jq '.[0].number // empty' 2>/dev/null
+          }
+
+          # gh opens a PR and then requests its reviewer in a second call.
+          # When only that second call fails, the create exits non-zero with
+          # the PR already open and lands in the raced path below — how
+          # token-atlas#377 opened with no request (ops#1457). That path
+          # calls this: request Chris only if he has neither a pending
+          # request nor a review, so it never re-requests an approval.
+          ensure_reviewer() {
+            if gh pr view "$1" --json reviewRequests,reviews \
+              --jq '[.reviewRequests[].login, .reviews[].author.login] | index("chrisgriffin")' | grep -qx null; then
+              echo "Requesting chrisgriffin's review on #$1."
+              gh api -X POST "repos/$GITHUB_REPOSITORY/pulls/$1/requested_reviewers" -f 'reviewers[]=chrisgriffin' >/dev/null ||
+                echo "::warning::Could not request chrisgriffin's review on #$1."
+            fi
+          }
+
+          # `gh pr list` can momentarily return empty right after the force-push
+          # (GitHub eventual consistency) or fail on a flaky API call. Retry a
+          # few times so we don't wrongly fall through to `gh pr create` for a
+          # PR that already exists.
+          EXISTING=""
+          for attempt in 1 2 3; do
+            EXISTING=$(find_existing) || EXISTING=""
+            if [ -n "$EXISTING" ]; then
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              sleep 3
+            fi
+          done
+
+          if [ -n "$EXISTING" ]; then
+            echo "Updating release PR #$EXISTING → $TITLE"
+            gh pr edit "$EXISTING" --title "$TITLE" --body "$BODY"
+          else
+            echo "No open release PR found — creating one."
+            # A concurrent run (or a still-consistent list) may have opened the
+            # PR already; gh then errors with "already exists". Treat that as
+            # success: re-query and edit instead of failing the whole release.
+            # --reviewer is set here, once, at creation — the `gh pr edit` paths
+            # deliberately leave it alone, since re-requesting on every push to
+            # develop would dismiss Chris's approval and this PR (which is
+            # refreshed for the life of the release) could never reach a
+            # mergeable state.
+            if ! gh pr create \
+              --title "$TITLE" \
+              --body "$BODY" \
+              --base main \
+              --head "$BRANCH" \
+              --draft \
+              --reviewer chrisgriffin; then
+              EXISTING=$(find_existing) || EXISTING=""
+              if [ -n "$EXISTING" ]; then
+                echo "Create raced with existing PR #$EXISTING — updating it instead."
+                gh pr edit "$EXISTING" --title "$TITLE" --body "$BODY"
+                ensure_reviewer "$EXISTING"
+              else
+                echo "::error::gh pr create failed and no open release PR was found." >&2
+                exit 1
+              fi
+            fi
+          fi
+
+      # The release PR's required Evaluator check (ops#1372). The gate used to
+      # wake on every push to release/next just to post this; it now skips
+      # release heads (_reusable-evaluator-gate.yml) and this job, already
+      # running, posts it. Last, on the sha it pushed: a failure anywhere
+      # above leaves the check expected and this run red, never a stale
+      # success. GITHUB_TOKEN, the identity the gate posts with: the release
+      # PAT cannot write statuses (403, 2026-10-07). Same context and words as
+      # the gate's phaseOf, so nothing a reader sees changes.
+      - name: Post the release PR's Evaluator status
+        if: steps.in-sync.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.build.outputs.sha }}
+        run: |
+          set -euo pipefail
+          gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$SHA" \
+            -f state=success \
+            -f context=Evaluator \
+            -f "description=Release or promotion PR — not graded" >/dev/null
+          echo "Evaluator: success on $SHA"

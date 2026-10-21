@@ -1,0 +1,32 @@
+name: (reusable) Merge sweep
+
+# Called via `workflow_call` from a repo's thin merge-sweep.yml stub, on a
+# push to its integration branch, where the repo has no Release PR job to
+# carry the dispatch.
+#
+# ops#1268. A merge into the base moves open PRs into conflict and sends them
+# no event; stale-grade-sweep.yml finds them, but its 20-minute cron has run
+# hours late since 2026-10-01, so a conflict sat until Chris found it
+# (workstation#143). This dispatches that sweep the moment the base moves. The
+# cron stays as the backstop. Kept out of the Evaluator gate, which is one job
+# with one token (ops#1164).
+#
+# Required repository secret on every caller (`secrets: inherit`):
+#   OPS_GH_TOKEN  # fine-grained PAT, actions:write on chrisgriffin/ops
+# ops itself has none and dispatches with TARGET_TOKEN, as
+# _reusable-claude-mention.yml does.
+
+on:
+  workflow_call:
+    inputs: {}
+
+permissions: {}
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: chrisgriffin/workflows/.github/actions/dispatch-sweep@develop
+        with:
+          token: ${{ secrets.OPS_GH_TOKEN || secrets.TARGET_TOKEN }}

@@ -1,0 +1,190 @@
+name: (reusable) Claude Mention
+
+# Answers two things: a real `@claude` mention by the repo's owner, a member
+# or a collaborator, and any comment or review the repo owner writes
+# (ops#1202, Chris 2026-09-29: "If you are in the process of replying, then
+# there should be a fucking placeholder comment stating that"). Either way
+# the first thing on the thread is a ⏳ placeholder comment, which mention.yml
+# later replaces with the reply, or with ❌.
+#
+# Nobody else gets a reply. The caller may be a public repo, and a mention
+# from a stranger would otherwise post a placeholder and start a Claude run
+# on the operator for anyone who typed the token (the author_association
+# gate below, in both the job `if:` and the detect step).
+#
+# Called via `workflow_call` from a target repo's thin claude-mention.yml
+# trigger stub (and from ops's own self-mention.yml) (the `on:` event block has to live in the target — GitHub only
+# fires issue_comment/pull_request_review*/issues on the repo where the event
+# happens). Everything else — detection, acknowledgement, dispatch — lives
+# here once (2026-08-20 ADR "Target-side workflow bodies move into ops as
+# reusable workflows"). github context (event payload, sender, comment body)
+# is inherited from the caller, so this reads the caller's event exactly as
+# the old per-target copy did.
+#
+# The caller passes `secrets: inherit`, so `secrets.OPS_GH_TOKEN` below
+# resolves to whatever that target repo has stored under that name — no
+# `on.workflow_call.secrets` declaration needed for inherited secrets.
+#
+# Required repository secret on every caller:
+#   OPS_GH_TOKEN  # fine-grained PAT, actions:write on chrisgriffin/ops
+#                 # (the built-in GITHUB_TOKEN is scoped to the caller repo
+#                 # and cannot dispatch a workflow on this one)
+# ops itself has no OPS_GH_TOKEN and dispatches with TARGET_TOKEN instead: the
+# ambient GITHUB_TOKEN's actor is github-actions[bot], which mention.yml's
+# claude-code-action step rejects (ops#157).
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        required: true
+        type: string
+
+permissions:
+  issues: write
+  pull-requests: write
+
+# Per event, not per thread: a third comment in a burst would otherwise cancel
+# the second one's pending run, and that comment would never get a placeholder.
+concurrency:
+  group: claude-mention-${{ github.event_name }}-${{ github.event.comment.id || github.event.review.id || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    # Ignore bot-authored events and cgio-agent (TARGET_TOKEN's actor, a real
+    # User): mention.yml replies through them, and a reply that re-fired this
+    # would loop (ops#155, ops#220/#232). Only the repo's OWNER, a MEMBER or a
+    # COLLABORATOR can reach the job at all; the association is read from
+    # whichever of the comment, the review or the issue the event carries.
+    # An OWNER comment or review needs no `@claude` — unless it is empty (a
+    # bare approval) or a slash command (`/autofix` is the PR loop gate's),
+    # dropped here so neither allocates a runner (ops#571); an issue event
+    # still needs the mention.
+    if: >-
+      github.event.sender.type != 'Bot' &&
+      github.event.sender.login != 'cgio-agent' &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association || github.event.review.author_association || github.event.issue.author_association) &&
+      (
+        (github.event_name == 'issue_comment' && (contains(github.event.comment.body, '@claude') || (github.event.comment.author_association == 'OWNER' && github.event.comment.body != '' && !startsWith(github.event.comment.body, '/')))) ||
+        (github.event_name == 'pull_request_review_comment' && (contains(github.event.comment.body, '@claude') || (github.event.comment.author_association == 'OWNER' && github.event.comment.body != '' && !startsWith(github.event.comment.body, '/')))) ||
+        (github.event_name == 'pull_request_review' && (contains(github.event.review.body, '@claude') || (github.event.review.author_association == 'OWNER' && github.event.review.body != '' && !startsWith(github.event.review.body, '/')))) ||
+        (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      # The job-level `if:` above is a cheap net: `contains()` matches
+      # `@claude` anywhere, including inside backticks/code spans, so a
+      # comment merely quoting the token (documentation, an old error
+      # message, one of the responder's own replies) still starts this job.
+      # This step does the precise check the expression syntax can't: strip
+      # fenced/backtick code before matching, and require the token to look
+      # like a real mention — not glued to another word or hyphenated handle
+      # (so an email address, `@claudexyz`, or a distinct `@claude-bot`
+      # doesn't count) — rather than a bare substring. Case-insensitive to
+      # match the job-level `contains()` gate above it (GH Actions expression
+      # functions are documented case-insensitive) — a capitalized `@Claude`
+      # must not pass that coarse filter and then silently drop here. A
+      # blockquote (GitHub's Quote reply) is deliberately NOT stripped: a
+      # re-ping via quote-reply is a real mention, not a false positive.
+      # ops#155 — a bot-authored reply quoting `@claude` in a code span kept
+      # re-triggering itself; the sender-type guard above stops bot-authored
+      # loops, but a human quoting the token in prose would still
+      # false-positive without this.
+      #
+      # An owner comment counts without a mention, unless it is empty (a bare
+      # approval) or a slash command: `/autofix` belongs to the PR loop gate.
+      # The job `if:` above already requires an owner, member or collaborator;
+      # the same check here is what a reviewer of this step can verify.
+      - name: Detect a real @claude mention or an owner comment
+        id: detect
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const strip = s =>
+              (s || '')
+                .replace(/```[\s\S]*?```/g, '')
+                .replace(/~~~[\s\S]*?~~~/g, '')
+                .replace(/`[^`]*`/g, '')
+            const isRealMention = s => /(?<![\w-])@claude(?![\w-])/i.test(strip(s))
+            const e = context.eventName
+            const text =
+              e === 'issue_comment' || e === 'pull_request_review_comment'
+                ? context.payload.comment.body
+                : e === 'pull_request_review'
+                  ? context.payload.review.body
+                  : `${context.payload.issue.body || ''}\n${context.payload.issue.title || ''}`
+            const author = (context.payload.comment || context.payload.review || context.payload.issue || {}).author_association
+            const allowed = ['OWNER', 'MEMBER', 'COLLABORATOR'].includes(author)
+            const body = (text || '').trim()
+            const owner = author === 'OWNER' && body !== '' && !body.startsWith('/')
+            const reply = allowed && (isRealMention(text) || owner)
+            core.setOutput('reply', reply ? 'true' : 'false')
+            if (!allowed) {
+              core.info(`Author association is ${author || 'none'}, not OWNER, MEMBER or COLLABORATOR — skipping.`)
+            } else if (!reply) {
+              core.info('Neither a real @claude mention nor an owner comment — skipping.')
+            }
+
+      # The placeholder: proof within seconds that the event fired and a reply
+      # is coming. mention.yml replaces this same comment with the reply, or
+      # with ❌ and its run link, so it never sits at ⏳. The marker is how
+      # mention.yml finds it; its comment id is what the dispatch carries.
+      # No placeholder at all means the trigger never matched; a ⏳ that never
+      # changes means the dispatch failed — check this run first.
+      - name: Post the placeholder
+        id: placeholder
+        if: steps.detect.outputs.reply == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const p = context.payload
+            const source = p.comment || p.review || p.issue
+            const { data } = await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: (p.issue || p.pull_request).number,
+              body:
+                `⏳ Seen, working on a reply to [this](${source.html_url}). ` +
+                `This comment is replaced by it.\n\n` +
+                `<!-- reply:placeholder ${context.eventName} ${source.id} -->`,
+            })
+            core.setOutput('id', String(data.id))
+
+      # Only identifiers cross the boundary — never the comment text. The
+      # operator's agent fetches the body itself with `gh`. Passing untrusted
+      # comment prose through a workflow input would both risk mangling it and
+      # hand an attacker a foothold in the dispatch payload.
+      - name: Dispatch to the operator
+        if: steps.detect.outputs.reply == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.OPS_GH_TOKEN || secrets.TARGET_TOKEN }}
+          PLACEHOLDER_ID: ${{ steps.placeholder.outputs.id }}
+          EVENT_KIND: ${{ github.event_name }}
+          THREAD: ${{ github.event.issue.number || github.event.pull_request.number }}
+          COMMENT_ID: ${{ github.event.comment.id || github.event.review.id || '' }}
+          ACTOR: ${{ github.event.sender.login }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::OPS_GH_TOKEN is not set. The placeholder is" \
+                 "posted but cannot be dispatched to chrisgriffin/ops." \
+                 "Mint a fine-grained PAT with actions:write on that repo and" \
+                 "add it as a repository secret."
+            exit 1
+          fi
+
+          gh workflow run mention.yml \
+            --repo chrisgriffin/ops \
+            --ref develop \
+            -f target="${{ inputs.target }}" \
+            -f kind="$EVENT_KIND" \
+            -f thread="$THREAD" \
+            -f comment_id="$COMMENT_ID" \
+            -f actor="$ACTOR" \
+            -f placeholder_id="$PLACEHOLDER_ID"
+
+          echo "Dispatched mention.yml to chrisgriffin/ops" \
+               "(thread #$THREAD, kind $EVENT_KIND, actor $ACTOR)."

@@ -1,0 +1,137 @@
+name: (reusable) Sync main to develop
+
+# Called via `workflow_call` from every repo's thin sync-main-to-develop.yml
+# trigger stub (2026-08-20 ADR "Target-side workflow bodies move into ops as
+# reusable workflows").
+#
+# After every push to main (a merged promotion PR), merge main back into develop
+# so the two branches never diverge. Clean merges push straight to develop; a
+# conflicting merge opens a PR for manual resolution instead of failing silently.
+#
+# Authenticates with TARGET_TOKEN, falling back to RELEASE_PR_TOKEN, falling
+# back to GITHUB_TOKEN (ops#429, ops#435). Every repo in the fleet carries one
+# PAT secret or the other — ops itself has TARGET_TOKEN (cgio-agent's PAT,
+# which has a role-scoped ruleset bypass); every target has RELEASE_PR_TOKEN
+# instead (chrisgriffin's own PAT).
+#
+# THAT CHAIN IS NOT ENOUGH, and the comment here used to claim it was —
+# "always resolves to a real, bypass-eligible PAT" (ops#523). A GitHub
+# ruleset only exempts actors it EXPLICITLY NAMES in `bypass_actors`; being
+# the repo's admin or owner is not itself a bypass. design-drift's `develop`
+# ruleset was tightened on 2026-08-22 with no bypass actors at all, so every
+# token in the chain — owner PAT included — is refused there. Do not restore
+# the old assumption; the push path below handles a refusal instead of
+# relying on it never happening. The caller passes `secrets: inherit` so these all resolve to the
+# CALLING repo's own secrets, not ops's.
+#
+# The re-merge (after `git merge --abort` restores develop) happens ON
+# develop — the branch is created afterwards, inside `open_sync_pr`. It hits
+# the IDENTICAL conflict every time — nothing changed between the abort
+# and the retry, so it's deterministic, not a race. `run:` executes under
+# `bash -e`, so unguarded that exit killed the step before `git push` or
+# `gh pr create` ever ran: the conflict path could never actually open a PR,
+# despite that being its whole reason to exist (found auditing
+# raycast-capture#34, ops#437). `if !` runs the re-merge exempt from errexit;
+# committing the conflicted tree with `--no-edit` (reusing the merge's own
+# message) is what makes the PR exist at all — a conflicted merge commits
+# nothing on its own, and a branch identical to develop makes `gh pr create`
+# fail with "No commits between develop and $BRANCH". The conflict markers
+# ride along on purpose: they're the diff Chris resolves in the PR.
+#
+# The conflict path applies the `no-issue` label unconditionally — this PR
+# has no issue to close, and every repo in the fleet now requires the
+# issue-reference check on develop, so the label is what lets it merge at
+# all. --reviewer is requested as a SEPARATE, soft-failing step rather than
+# inline on `gh pr create`: when the active token is RELEASE_PR_TOKEN, the PR
+# is already authored by chrisgriffin, and GitHub hard-rejects a review
+# request from a PR's own author — that used to fail the whole `gh pr create`
+# call inline, silently leaving the conflict branch pushed with no PR at all
+# (found auditing design-drift#290).
+
+on:
+  workflow_call: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: develop
+          token: ${{ secrets.TARGET_TOKEN || secrets.RELEASE_PR_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Check if already in sync
+        id: check
+        run: |
+          git fetch origin
+          BEHIND=$(git log HEAD..origin/main --oneline | wc -l | tr -d ' ')
+          echo "behind=$BEHIND" >> "$GITHUB_OUTPUT"
+
+      - name: Merge main into develop
+        if: steps.check.outputs.behind != '0'
+        env:
+          GH_TOKEN: ${{ secrets.TARGET_TOKEN || secrets.RELEASE_PR_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          # Open a PR carrying whatever is on HEAD, for a human to merge.
+          # Used by BOTH fallbacks: a conflicting merge, and a clean merge
+          # whose push `develop`'s ruleset refuses (ops#523).
+          open_sync_pr() {
+            BRANCH="sync/main-to-develop-$(TZ='America/Los_Angeles' date +%Y%m%d%H%M%S)"
+            git checkout -b "$BRANCH"
+            git push origin "$BRANCH"
+            gh label create no-issue \
+              --color "EDEDED" \
+              --description "PR with no associated issue to close" \
+              2>/dev/null || true
+            gh pr create \
+              --title "chore: sync main to develop" \
+              --body "$1" \
+              --base develop \
+              --head "$BRANCH"
+            gh pr edit "$BRANCH" --add-label no-issue 2>/dev/null || true
+            gh pr edit "$BRANCH" --add-reviewer chrisgriffin 2>/dev/null || true
+          }
+
+          if git merge origin/main --no-edit -m "chore: sync main to develop [skip-release]"; then
+            # ops#523: a clean merge can still be REFUSED at the push. A
+            # ruleset only exempts actors it explicitly names, and admin or
+            # owner status is not itself a bypass — so on a target whose
+            # `develop` ruleset lists no bypass actor, no token in the chain
+            # above can push here. This used to fail the step under `bash -e`
+            # and stop, leaving `develop` silently behind `main`: design-drift
+            # shipped v0.12.0 while `develop` stayed on 0.11.0, and the next
+            # release PR proposed v0.11.1 — a version BELOW the published one.
+            #
+            # The merge commit is already on local `develop`, so the fallback
+            # just carries it to a branch and opens a PR. No conflict markers:
+            # this one is ready to merge as-is.
+            if git push origin develop; then
+              echo "Pushed the sync merge directly to develop."
+            else
+              echo "::warning::Direct push to develop was refused — opening a PR instead. Add a bypass actor to this repo's develop ruleset if direct pushes should work (ops#524)."
+              git reset --hard HEAD
+              open_sync_pr "Automated sync of \`main\` → \`develop\`.
+
+          The merge is **clean** — this branch is ready to merge as-is. It exists only because pushing straight to \`develop\` was refused by that branch's ruleset, which names no bypass actor (ops#523).
+
+          To let the sync push directly again, add a bypass actor to the \`develop\` ruleset. Until then this PR is the sync, and it needs a human merge each release."
+            fi
+          else
+            git merge --abort
+            if ! git merge origin/main --no-edit; then
+              git add -A
+              git commit --no-edit
+            fi
+            open_sync_pr "Automated sync of \`main\` → \`develop\`. Conflicts were detected: this branch carries the merge commit **with conflict markers still in it** — resolve them here and merge."
+          fi
