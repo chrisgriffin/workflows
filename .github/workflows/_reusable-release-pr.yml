@@ -122,11 +122,12 @@ jobs:
           fetch-depth: 0
           ref: develop
           # The token clones; it is NOT persisted into .git/config, where a
-          # caller-supplied `extra_build_command` could read it. The one
-          # `git push` below authenticates itself, with the same token, so
-          # the push (and thus the PR) is still authored by RELEASE_PR_TOKEN's
-          # actor — not GITHUB_TOKEN, whose events never trigger downstream
-          # checks.
+          # caller-supplied `extra_build_command` could read it. Every later
+          # git call that reaches the remote authenticates itself, with the
+          # same token: on a private caller an unauthenticated fetch dies
+          # asking for a username (ops#1702). So the push (and thus the PR)
+          # is still authored by RELEASE_PR_TOKEN's actor — not GITHUB_TOKEN,
+          # whose events never trigger downstream checks.
           token: ${{ secrets.RELEASE_PR_TOKEN || secrets.GITHUB_TOKEN }}
           persist-credentials: false
 
@@ -141,13 +142,15 @@ jobs:
           # expressions have no length(), and an unknown function fails
           # workflow validation for every target at once.
           SKIP_RELEASE: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[skip-release]') && github.event.commits != null && github.event.commits[1] == null }}
+          RELEASE_PR_TOKEN: ${{ secrets.RELEASE_PR_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           if [ "$SKIP_RELEASE" = "true" ]; then
             echo "A single [skip-release] commit (a sync merge-back) — no release built."
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          git fetch origin main --tags
+          AUTH=$(printf 'x-access-token:%s' "$RELEASE_PR_TOKEN" | base64 | tr -d '\n')
+          git -c "http.extraheader=AUTHORIZATION: basic $AUTH" fetch origin main --tags
 
           AHEAD=$(git rev-list --count origin/main..origin/develop)
           if [ "$AHEAD" = "0" ]; then
@@ -361,6 +364,8 @@ jobs:
       - name: Calculate next version
         if: steps.in-sync.outputs.skip != 'true'
         id: version
+        env:
+          RELEASE_PR_TOKEN: ${{ secrets.RELEASE_PR_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           CURRENT=$(node -p "require('./package.json').version")
 
@@ -402,7 +407,8 @@ jobs:
           # Guard against the race where another release shipped during this run.
           # If v$NEXT is already tagged, opening a PR for it would create a
           # CHANGELOG.md / package.json conflict against main.
-          git fetch --tags --force origin >/dev/null 2>&1 || true
+          AUTH=$(printf 'x-access-token:%s' "$RELEASE_PR_TOKEN" | base64 | tr -d '\n')
+          git -c "http.extraheader=AUTHORIZATION: basic $AUTH" fetch --tags --force origin >/dev/null 2>&1 || true
           if git rev-parse --verify --quiet "refs/tags/v$NEXT" >/dev/null; then
             echo "Tag v$NEXT already exists — another release shipped during this run. Skipping."
             echo "skip=true" >> "$GITHUB_OUTPUT"
