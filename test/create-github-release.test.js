@@ -5,7 +5,7 @@
  * `hotfix/*` PR lands on main: reads the version, cuts that section out of
  * CHANGELOG.md, creates the Release and tag, then the optional publishes.
  * The shell that decides something (the awk that cuts the notes, the
- * Marketplace job's no-PAT skip and publish) runs here.
+ * Marketplace job's no-token skips and publishes) runs here.
  */
 const { readFileSync, mkdtempSync, writeFileSync, chmodSync } = require("fs")
 const { execSync, spawnSync } = require("child_process")
@@ -206,24 +206,26 @@ ${h2}
 })
 
 // ---------------------------------------------------------------------------
-// The `marketplace` job (ops#1358, #16). Which caller publishes is its
+// The `marketplace` job (ops#1358, #16): publishes to the VS Code Marketplace
+// (`VSCE_PAT`) and Open VSX (`OVSX_PAT`). Which caller publishes is its
 // `marketplace_packages` input, and the job must tell apart "publishes
-// nothing" (the job never starts) and "no VSCE_PAT yet" (a notice), or the
-// day the PAT lands nobody can tell whether publishing started. It is its own
-// job, reading the .vsix off the Release by version, so re-running a failed
-// publish retries it even though the Release now exists.
+// nothing" (the job never starts) and "no token yet" (a notice per
+// registry), or the day a token lands nobody can tell whether publishing
+// started. It is its own job, reading the .vsix off the Release by version,
+// so re-running a failed publish retries it even though the Release exists.
 // ---------------------------------------------------------------------------
 describe("the marketplace job", () => {
   // `|| { steps: [] }` so each test, not the whole file, fails without it.
   const job = doc.jobs.marketplace || { steps: [] }
   const publish = job.steps.find(
-    s => s.name === "Publish to the VS Code Marketplace",
+    s => s.name === "Publish to the VS Code Marketplace and Open VSX",
   )
 
   // The step's script run the way the runner would (`bash -e`, its env),
   // with `gh` and `npx` stubbed: `gh release download` drops the Release's
-  // .vsix into --dir, npx logs what vsce would have been run with.
-  function runStep({ pat, npxExit = 0 }) {
+  // .vsix into --dir; npx logs each tool's arguments and the tokens it saw,
+  // and exits with that tool's code.
+  function runStep({ vsce = "", ovsx = "", vsceExit = 0, ovsxExit = 0 }) {
     const bin = mkdtempSync(join(os.tmpdir(), "marketplace-bin-"))
     const log = join(bin, "calls.log")
     writeFileSync(log, "")
@@ -233,7 +235,8 @@ describe("the marketplace job", () => {
     )
     writeFileSync(
       join(bin, "npx"),
-      `#!/bin/sh\necho "npx $*" >> "${log}"\necho "pat=$VSCE_PAT" >> "${log}"\nexit ${npxExit}\n`,
+      `#!/bin/sh\necho "npx $* vsce_pat=$VSCE_PAT ovsx_pat=$OVSX_PAT" >> "${log}"\n` +
+        `case "$2" in @vscode/vsce@*) exit ${vsceExit};; ovsx@*) exit ${ovsxExit};; esac\n`,
     )
     chmodSync(join(bin, "gh"), 0o755)
     chmodSync(join(bin, "npx"), 0o755)
@@ -244,7 +247,8 @@ describe("the marketplace job", () => {
         REPO: "o/r",
         VERSION: "0.1.0",
         PACKAGES: "./*.vsix",
-        VSCE_PAT: pat,
+        VSCE_PAT: vsce,
+        OVSX_PAT: ovsx,
       },
     })
     return {
@@ -253,6 +257,11 @@ describe("the marketplace job", () => {
       calls: readFileSync(log, "utf8"),
     }
   }
+
+  const VSCE =
+    /^npx --yes @vscode\/vsce@\d+\.\d+\.\d+ publish --skip-duplicate --packagePath \.\/ext-0\.1\.0\.vsix /m
+  const OVSX =
+    /^npx --yes ovsx@\d+\.\d+\.\d+ publish --skip-duplicate --packagePath \.\/ext-0\.1\.0\.vsix /m
 
   it("runs after the release job, only for a caller passing marketplace_packages", () => {
     expect(job.needs).toBe("release")
@@ -280,46 +289,95 @@ describe("the marketplace job", () => {
     expect(publish.env.VERSION).toBe("${{ needs.release.outputs.version }}")
   })
 
-  it("reads the caller's input and named secret, with no table keyed on the repo", () => {
+  it("reads the caller's input and two named secrets, with no table keyed on the repo", () => {
     expect(publish.env.PACKAGES).toBe("${{ inputs.marketplace_packages }}")
     expect(publish.env.VSCE_PAT).toBe("${{ secrets.VSCE_PAT }}")
+    expect(publish.env.OVSX_PAT).toBe("${{ secrets.OVSX_PAT }}")
     expect(publish.run).not.toMatch(/case "\$REPO"/)
-    expect(Object.keys(doc.on.workflow_call.secrets)).toEqual(["VSCE_PAT"])
+    expect(Object.keys(doc.on.workflow_call.secrets)).toEqual([
+      "VSCE_PAT",
+      "OVSX_PAT",
+    ])
   })
 
-  it("gates inside the step, never with an if: on the secret", () => {
+  it("gates inside the step, never with an if: on a secret", () => {
     // A secret in an `if:` skips the step with no log line — the silent
-    // case the notice exists to prevent.
+    // case the notices exist to prevent.
     for (const s of [job, ...job.steps]) {
       expect(String(s.if ?? "")).not.toMatch(/secrets\./)
-      expect(String(s.if ?? "")).not.toMatch(/VSCE_PAT/)
+      expect(String(s.if ?? "")).not.toMatch(/_PAT/)
     }
   })
 
-  it("skips green with a notice when there is no PAT, without reaching gh or vsce", () => {
-    const r = runStep({ pat: "" })
+  it("skips green with a notice when there is no token, without reaching gh or npx", () => {
+    const r = runStep({})
     expect(r.status).toBe(0)
-    expect(r.out).toMatch(/::notice::.*no VSCE_PAT secret on o\/r/)
+    expect(r.out).toMatch(/::notice::.*no VSCE_PAT or OVSX_PAT secret on o\/r/)
     expect(r.calls).toBe("")
   })
 
-  it("publishes the Release's own .vsix, by version, with a pinned vsce and the PAT only in the env", () => {
-    const r = runStep({ pat: "secret-pat" })
+  it("publishes the Release's own .vsix to both registries, pinned, each tool seeing only its own token", () => {
+    const r = runStep({ vsce: "v-pat", ovsx: "o-pat" })
     expect(r.status).toBe(0)
     expect(r.calls).toMatch(/^gh release download v0\.1\.0 --repo o\/r --dir /m)
-    expect(r.calls).toMatch(
-      /^npx --yes @vscode\/vsce@\d+\.\d+\.\d+ publish --skip-duplicate --packagePath \.\/ext-0\.1\.0\.vsix$/m,
-    )
-    expect(r.calls).toContain("pat=secret-pat")
+    expect(r.calls).toMatch(VSCE)
+    expect(r.calls).toMatch(OVSX)
+    expect(r.calls).toMatch(/@vscode\/vsce.* vsce_pat=v-pat ovsx_pat=$/m)
+    expect(r.calls).toMatch(/ovsx@.* vsce_pat= ovsx_pat=o-pat$/m)
     expect(publish.run).not.toMatch(/--pat|-p /)
   })
 
-  // vsce's own `--skip-duplicate` is the "already published" check: a retry
-  // of a version that did reach the Marketplace is green. Any other failure
-  // still reds the job, because a swallowed one looks exactly like the no-op.
-  it("reds the job when the publish itself fails", () => {
-    const r = runStep({ pat: "secret-pat", npxExit: 1 })
+  test.each([
+    [
+      "VSCE_PAT",
+      { ovsx: "o-pat" },
+      OVSX,
+      VSCE,
+      /VS Code Marketplace publish skipped: no VSCE_PAT/,
+    ],
+    [
+      "OVSX_PAT",
+      { vsce: "v-pat" },
+      VSCE,
+      OVSX,
+      /Open VSX publish skipped: no OVSX_PAT/,
+    ],
+  ])(
+    "with no %s, skips that registry with a notice and still publishes the other",
+    (_, tokens, published, skipped, notice) => {
+      const r = runStep(tokens)
+      expect(r.status).toBe(0)
+      expect(r.out).toMatch(notice)
+      expect(r.calls).toMatch(published)
+      expect(r.calls).not.toMatch(skipped)
+    },
+  )
+
+  // `--skip-duplicate` is each tool's own "already published" check: a retry
+  // of a version that did reach a registry is green. Any other failure still
+  // reds the job, because a swallowed one looks exactly like the no-op.
+  test.each([
+    [
+      "the Marketplace",
+      { vsceExit: 1 },
+      /Publish failed: VS-Code-Marketplace$/m,
+    ],
+    ["Open VSX", { ovsxExit: 1 }, /Publish failed: Open-VSX$/m],
+  ])(
+    "a failed publish to %s reds the job without skipping the other registry",
+    (_, exits, error) => {
+      const r = runStep({ vsce: "v-pat", ovsx: "o-pat", ...exits })
+      expect(r.status).not.toBe(0)
+      expect(r.out).toMatch(error)
+      expect(r.calls).toMatch(VSCE)
+      expect(r.calls).toMatch(OVSX)
+    },
+  )
+
+  it("reds the job when both publishes fail, and never swallows a failure", () => {
+    const r = runStep({ vsce: "v", ovsx: "o", vsceExit: 1, ovsxExit: 1 })
     expect(r.status).not.toBe(0)
+    expect(r.out).toMatch(/Publish failed: VS-Code-Marketplace Open-VSX$/m)
     expect(job["continue-on-error"]).toBeUndefined()
     expect(publish["continue-on-error"]).toBeUndefined()
     expect(publish.run).not.toMatch(/\|\|\s*true/)
