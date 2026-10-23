@@ -4,6 +4,12 @@ Every release of the fleet's shared workflows. Each entry is generated from
 the conventional-commit history by the release PR; a caller pinned to the
 floating `v1` tag receives every entry under that major on merge.
 
+## [1.3.0](https://github.com/chrisgriffin/workflows/compare/v1.2.0...v1.3.0) (2026-10-23)
+
+### Features
+
+- **release-pr:** let the caller's RELEASE_AS variable force the next version ([c7ef457](https://github.com/chrisgriffin/workflows/commit/c7ef457adf835ffe7d17e72d9392687237278731)), closes [#13](https://github.com/chrisgriffin/workflows/issues/13)
+
 ## [1.2.0](https://github.com/chrisgriffin/workflows/compare/v1.1.0...v1.2.0) (2026-10-22)
 
 ### Features
