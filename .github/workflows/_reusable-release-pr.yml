@@ -8,6 +8,8 @@ name: (reusable) Release PR
 # BREAKING CHANGE → major (minor below 1.0.0), anything else (chore/docs/
 # style/ci/refactor/test/build) → patch. A release PR is always opened when develop is ahead
 # of main — there is no "no release this time" case.
+# The caller repo's `RELEASE_AS` Actions variable forces a higher version
+# (how 1.0.0 ships, since no commit can); see `Calculate next version`.
 #
 # Fully self-contained: no target repo commits a changelog-preset config,
 # a version-recommend npm script, or any conventional-changelog
@@ -366,6 +368,9 @@ jobs:
         id: version
         env:
           RELEASE_PR_TOKEN: ${{ secrets.RELEASE_PR_TOKEN || secrets.GITHUB_TOKEN }}
+          # In a reusable workflow `vars` is the CALLER repo's variables
+          # (GitHub docs, "Configuration variable precedence"). Empty when unset.
+          RELEASE_AS: ${{ vars.RELEASE_AS }}
         run: |
           CURRENT=$(node -p "require('./package.json').version")
 
@@ -403,6 +408,36 @@ jobs:
           esac
 
           echo "Bump: $BUMP — $CURRENT → $NEXT"
+
+          # RELEASE_AS: the caller's way to make the call the demotion above
+          # leaves to a person (1.0.0, say). A repository variable is set in
+          # the repo's settings, never by a commit. It wins only when above
+          # the commit bump; at or below the current version it is a stale
+          # value from a release that already shipped, and is ignored.
+          ver_gt() { # $1 > $2, both X.Y.Z
+            local a b i
+            IFS='.' read -r -a a <<< "$1"
+            IFS='.' read -r -a b <<< "$2"
+            for i in 0 1 2; do
+              if [ "${a[i]}" -gt "${b[i]}" ]; then return 0; fi
+              if [ "${a[i]}" -lt "${b[i]}" ]; then return 1; fi
+            done
+            return 1
+          }
+          if [ -n "$RELEASE_AS" ]; then
+            if ! [[ "$RELEASE_AS" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+              echo "::error::RELEASE_AS='$RELEASE_AS' is not a plain X.Y.Z version (no v, no pre-release). Fix or delete the repository variable."
+              exit 1
+            fi
+            if ! ver_gt "$RELEASE_AS" "$CURRENT"; then
+              echo "RELEASE_AS=$RELEASE_AS is not above $CURRENT — a stale value from a shipped release; ignored."
+            elif ver_gt "$RELEASE_AS" "$NEXT"; then
+              echo "RELEASE_AS=$RELEASE_AS overrides the commit bump ($NEXT): $CURRENT → $RELEASE_AS"
+              NEXT="$RELEASE_AS"
+            else
+              echo "RELEASE_AS=$RELEASE_AS is not above the commit bump $NEXT; keeping $NEXT."
+            fi
+          fi
 
           # Guard against the race where another release shipped during this run.
           # If v$NEXT is already tagged, opening a PR for it would create a
