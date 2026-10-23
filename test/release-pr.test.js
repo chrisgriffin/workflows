@@ -366,7 +366,7 @@ function calculateNextVersionScript() {
  * `history` entries are commit messages ("subject" or "subject\n\nbody"), or
  * `{ tag }` to tag the commit before them.
  */
-function runStep(history, { version = "1.2.3" } = {}) {
+function runStep(history, { version = "1.2.3", releaseAs = "" } = {}) {
   const dir = mkdtempSync(join(os.tmpdir(), "release-pr-step-"))
   const repo = join(dir, "repo")
   mkdirSync(repo)
@@ -418,13 +418,14 @@ function runStep(history, { version = "1.2.3" } = {}) {
   const r = spawnSync("bash", ["-e", scriptPath], {
     cwd: repo,
     encoding: "utf8",
-    env: { ...env, GITHUB_OUTPUT: outputs },
+    env: { ...env, GITHUB_OUTPUT: outputs, RELEASE_AS: releaseAs },
     timeout: 15000,
     killSignal: "SIGKILL",
   })
   return {
     status: r.status,
     outputs: readFileSync(outputs, "utf8"),
+    log: r.stdout + r.stderr,
   }
 }
 
@@ -481,6 +482,46 @@ describe("_reusable-release-pr.yml — Calculate next version reads the bump fro
     expect(r.status).toBe(0)
     expect(r.outputs).toContain(`next=${next}`)
   })
+})
+
+// RELEASE_AS: the caller repo's Actions variable forces the next version,
+// the one way past the pre-1.0 demotion above. Set in the repo's settings,
+// never by a commit.
+describe("_reusable-release-pr.yml — the RELEASE_AS repository variable", () => {
+  it("reads RELEASE_AS from the caller's vars through env, never inline", () => {
+    const step = yaml
+      .load(text)
+      .jobs["release-pr"].steps.find(s => s.name === "Calculate next version")
+    expect(step.env.RELEASE_AS).toBe("${{ vars.RELEASE_AS }}")
+    expect(step.run).not.toContain("${{")
+  })
+
+  test.each([
+    ["unset: the commit bump", "", "0.31.0", /Bump: minor/],
+    ["1.0.0 from 0.30.2", "1.0.0", "1.0.0", /RELEASE_AS=1\.0\.0 overrides/],
+    ["stale 0.1.0", "0.1.0", "0.31.0", /RELEASE_AS=0\.1\.0 is not above 0\.30\.2.*ignored/],
+    [
+      "at or below the commit bump",
+      "0.30.5",
+      "0.31.0",
+      /RELEASE_AS=0\.30\.5 is not above the commit bump 0\.31\.0/,
+    ],
+  ])("RELEASE_AS %s → next=%s", (_, releaseAs, next, log) => {
+    const r = runStep(["feat!: rename"], { version: "0.30.2", releaseAs })
+    expect(r.status).toBe(0)
+    expect(r.outputs).toContain(`next=${next}\n`)
+    expect(r.log).toMatch(log)
+  })
+
+  test.each(["v1.0.0", "1.0", "1.0.0-beta.1", "01.0.0", " 1.0.0"])(
+    "RELEASE_AS %p (malformed) fails the step before any output",
+    releaseAs => {
+      const r = runStep(["fix: bug"], { version: "0.30.2", releaseAs })
+      expect(r.status).not.toBe(0)
+      expect(r.log).toContain(`::error::RELEASE_AS='${releaseAs}'`)
+      expect(r.outputs).toBe("")
+    },
+  )
 })
 
 describe("_reusable-release-pr.yml — PR-collection logic", () => {

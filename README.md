@@ -121,6 +121,12 @@ lists the shipping PRs, and dispatches the operator's conflict sweep.
   (all empty: no extra build artifact in the release commit).
 - Secrets: `RELEASE_PR_TOKEN` (a PAT, so the PR's checks fire),
   `OPS_GH_TOKEN` (the sweep dispatch), `NODE_AUTH_TOKEN` (optional).
+- Variables: `RELEASE_AS` (optional), an Actions variable on the calling
+  repo, set in its settings rather than by a commit: a plain `X.Y.Z` (say
+  `1.0.0`, which a commit never reaches from `0.x`) becomes the next version
+  when it is above the commit bump, and a malformed value fails the run.
+  Leave it or delete it after the release ships; a value not above the
+  current version is ignored.
 - The stub grants `contents: write`, `pull-requests: write`, `statuses: write`.
 
 ```yaml
