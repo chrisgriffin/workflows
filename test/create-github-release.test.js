@@ -5,7 +5,7 @@
  * `hotfix/*` PR lands on main: reads the version, cuts that section out of
  * CHANGELOG.md, creates the Release and tag, then the optional publishes.
  * The shell that decides something (the awk that cuts the notes, the
- * Marketplace step's two no-ops) runs here.
+ * Marketplace job's no-PAT skip and publish) runs here.
  */
 const { readFileSync, mkdtempSync, writeFileSync, chmodSync } = require("fs")
 const { execSync, spawnSync } = require("child_process")
@@ -55,7 +55,6 @@ describe("the release gate", () => {
       "Create GitHub Release",
       "Move the floating major tag",
       "Publish package",
-      "Publish to the VS Code Marketplace",
     ])
   })
 })
@@ -207,102 +206,122 @@ ${h2}
 })
 
 // ---------------------------------------------------------------------------
-// "Publish to the VS Code Marketplace" (ops#1358). Which caller publishes is
-// its `marketplace_packages` input, and the step must tell apart its two
-// no-ops — a caller that publishes nothing, and one whose `VSCE_PAT` does
-// not exist yet — or the day the PAT lands nobody can tell whether
-// publishing started. Past both gates the publish is unguarded.
+// The `marketplace` job (ops#1358, #16). Which caller publishes is its
+// `marketplace_packages` input, and the job must tell apart "publishes
+// nothing" (the job never starts) and "no VSCE_PAT yet" (a notice), or the
+// day the PAT lands nobody can tell whether publishing started. It is its own
+// job, reading the .vsix off the Release by version, so re-running a failed
+// publish retries it even though the Release now exists.
 // ---------------------------------------------------------------------------
-describe("Publish to the VS Code Marketplace", () => {
-  const STEP_NAME = "Publish to the VS Code Marketplace"
-  const step = named(STEP_NAME)
+describe("the marketplace job", () => {
+  // `|| { steps: [] }` so each test, not the whole file, fails without it.
+  const job = doc.jobs.marketplace || { steps: [] }
+  const publish = job.steps.find(
+    s => s.name === "Publish to the VS Code Marketplace",
+  )
 
-  // Run the step's script the way the runner would: `bash -e`, the step's
-  // env with the expressions replaced, inside a workspace holding a .vsix.
-  function runStep({ packages, pat, npxExit = 0 }) {
-    const dir = mkdtempSync(join(os.tmpdir(), "marketplace-"))
+  // The step's script run the way the runner would (`bash -e`, its env),
+  // with `gh` and `npx` stubbed: `gh release download` drops the Release's
+  // .vsix into --dir, npx logs what vsce would have been run with.
+  function runStep({ pat, npxExit = 0 }) {
     const bin = mkdtempSync(join(os.tmpdir(), "marketplace-bin-"))
-    writeFileSync(join(dir, "ext-0.1.0.vsix"), "")
-    writeFileSync(join(dir, "script.sh"), step.run)
-    const log = join(bin, "npx.log")
+    const log = join(bin, "calls.log")
+    writeFileSync(log, "")
+    writeFileSync(
+      join(bin, "gh"),
+      `#!/bin/sh\necho "gh $*" >> "${log}"\nwhile [ $# -gt 0 ]; do [ "$1" = --dir ] && : > "$2/ext-0.1.0.vsix"; shift; done\n`,
+    )
     writeFileSync(
       join(bin, "npx"),
-      `#!/bin/sh\necho "$@" >> "${log}"\necho "pat=$VSCE_PAT" >> "${log}"\nexit ${npxExit}\n`,
+      `#!/bin/sh\necho "npx $*" >> "${log}"\necho "pat=$VSCE_PAT" >> "${log}"\nexit ${npxExit}\n`,
     )
+    chmodSync(join(bin, "gh"), 0o755)
     chmodSync(join(bin, "npx"), 0o755)
-    const res = spawnSync("bash", ["-e", "script.sh"], {
-      cwd: dir,
+    const res = spawnSync("bash", ["-e", "-c", publish.run], {
       encoding: "utf8",
       env: {
         PATH: `${bin}:${process.env.PATH}`,
         REPO: "o/r",
-        PACKAGES: packages,
+        VERSION: "0.1.0",
+        PACKAGES: "./*.vsix",
         VSCE_PAT: pat,
       },
     })
-    let npx = ""
-    try {
-      npx = readFileSync(log, "utf8")
-    } catch {
-      // npx never ran
+    return {
+      status: res.status,
+      out: res.stdout + res.stderr,
+      calls: readFileSync(log, "utf8"),
     }
-    return { status: res.status, out: res.stdout + res.stderr, npx }
   }
 
-  it("is the last step of the release job", () => {
-    expect(step).toBeDefined()
-    expect(steps[steps.length - 1].name).toBe(STEP_NAME)
-  })
-
-  it("reads the caller's input and named secret, with no table keyed on the repo", () => {
-    expect(step.env.PACKAGES).toBe("${{ inputs.marketplace_packages }}")
-    expect(step.env.VSCE_PAT).toBe("${{ secrets.VSCE_PAT }}")
-    expect(step.run).not.toMatch(/case "\$REPO"/)
+  it("runs after the release job, only for a caller passing marketplace_packages", () => {
+    expect(job.needs).toBe("release")
+    expect(job.if).toBe("inputs.marketplace_packages != ''")
+    expect(typeof job["timeout-minutes"]).toBe("number")
     expect(doc.on.workflow_call.inputs.marketplace_packages).toMatchObject({
       required: false,
       type: "string",
       default: "",
     })
+  })
+
+  // #16 — the publish used to be a step after `gh release create`, behind
+  // the version step's skip. A failed publish left the Release behind, so a
+  // re-run saw it, skipped, and never retried.
+  it("is not gated on the release job's skip, so a re-run retries the publish", () => {
+    expect(job.if).not.toMatch(/skip/)
+    for (const s of job.steps) expect(String(s.if ?? "")).not.toMatch(/skip/)
+    expect(steps.map(s => s.name)).not.toContain(
+      "Publish to the VS Code Marketplace",
+    )
+    expect(doc.jobs.release.outputs.version).toBe(
+      "${{ steps.version.outputs.version }}",
+    )
+    expect(publish.env.VERSION).toBe("${{ needs.release.outputs.version }}")
+  })
+
+  it("reads the caller's input and named secret, with no table keyed on the repo", () => {
+    expect(publish.env.PACKAGES).toBe("${{ inputs.marketplace_packages }}")
+    expect(publish.env.VSCE_PAT).toBe("${{ secrets.VSCE_PAT }}")
+    expect(publish.run).not.toMatch(/case "\$REPO"/)
     expect(Object.keys(doc.on.workflow_call.secrets)).toEqual(["VSCE_PAT"])
   })
 
-  it("gates inside the step, never with a step-level if: on the secret", () => {
+  it("gates inside the step, never with an if: on the secret", () => {
     // A secret in an `if:` skips the step with no log line — the silent
-    // case the two skip messages exist to prevent.
-    expect(String(step.if ?? "")).not.toMatch(/secrets\./)
-    expect(String(step.if ?? "")).not.toMatch(/VSCE_PAT/)
+    // case the notice exists to prevent.
+    for (const s of [job, ...job.steps]) {
+      expect(String(s.if ?? "")).not.toMatch(/secrets\./)
+      expect(String(s.if ?? "")).not.toMatch(/VSCE_PAT/)
+    }
   })
 
-  it("skips a caller passing no packages, green, without reaching vsce", () => {
-    const r = runStep({ packages: "", pat: "x" })
+  it("skips green with a notice when there is no PAT, without reaching gh or vsce", () => {
+    const r = runStep({ pat: "" })
     expect(r.status).toBe(0)
-    expect(r.out).toMatch(/passes no marketplace_packages/)
-    expect(r.out).not.toMatch(/VSCE_PAT/)
-    expect(r.npx).toBe("")
+    expect(r.out).toMatch(/::notice::.*no VSCE_PAT secret on o\/r/)
+    expect(r.calls).toBe("")
   })
 
-  it("skips a caller with packages but no PAT, green, with a different line", () => {
-    const r = runStep({ packages: "./*.vsix", pat: "" })
+  it("publishes the Release's own .vsix, by version, with a pinned vsce and the PAT only in the env", () => {
+    const r = runStep({ pat: "secret-pat" })
     expect(r.status).toBe(0)
-    expect(r.out).toMatch(/no VSCE_PAT secret/)
-    expect(r.out).not.toMatch(/passes no marketplace_packages/)
-    expect(r.npx).toBe("")
-  })
-
-  it("publishes the built .vsix with a pinned vsce, the PAT only in the env", () => {
-    const r = runStep({ packages: "./*.vsix", pat: "secret-pat" })
-    expect(r.status).toBe(0)
-    expect(r.npx).toMatch(
-      /^--yes @vscode\/vsce@\d+\.\d+\.\d+ publish --packagePath \.\/ext-0\.1\.0\.vsix$/m,
+    expect(r.calls).toMatch(/^gh release download v0\.1\.0 --repo o\/r --dir /m)
+    expect(r.calls).toMatch(
+      /^npx --yes @vscode\/vsce@\d+\.\d+\.\d+ publish --skip-duplicate --packagePath \.\/ext-0\.1\.0\.vsix$/m,
     )
-    expect(r.npx).toContain("pat=secret-pat")
-    expect(step.run).not.toMatch(/--pat|-p /)
+    expect(r.calls).toContain("pat=secret-pat")
+    expect(publish.run).not.toMatch(/--pat|-p /)
   })
 
+  // vsce's own `--skip-duplicate` is the "already published" check: a retry
+  // of a version that did reach the Marketplace is green. Any other failure
+  // still reds the job, because a swallowed one looks exactly like the no-op.
   it("reds the job when the publish itself fails", () => {
-    const r = runStep({ packages: "./*.vsix", pat: "secret-pat", npxExit: 1 })
+    const r = runStep({ pat: "secret-pat", npxExit: 1 })
     expect(r.status).not.toBe(0)
-    expect(step["continue-on-error"]).toBeUndefined()
-    expect(step.run).not.toMatch(/\|\|\s*true/)
+    expect(job["continue-on-error"]).toBeUndefined()
+    expect(publish["continue-on-error"]).toBeUndefined()
+    expect(publish.run).not.toMatch(/\|\|\s*true/)
   })
 })

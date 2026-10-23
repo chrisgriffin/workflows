@@ -150,6 +150,17 @@ VS Code extension to the Marketplace.
   other repos `uses:` by tag).
 - Secrets: `VSCE_PAT` (only with `marketplace_packages`).
 - The stub grants `contents: write` (`packages: write` to publish a package).
+- The Marketplace publish is its own job, after the release: it downloads the
+  Release's assets matching `marketplace_packages` and runs
+  `vsce publish --skip-duplicate`. No `VSCE_PAT`: it skips green with a
+  notice. A failed publish is retried by re-running the run; the job reads
+  the `.vsix` back off the Release, which already exists, and a version
+  already on the Marketplace counts as published.
+- `VSCE_PAT` is a global Azure DevOps PAT (organization "All accessible
+  organizations"), which Microsoft retires on 2026-12-01. After that the PAT
+  stops working; remove the secret, and the caller uploads the Release's
+  `.vsix` by hand with "Update" on its extension at
+  [marketplace.visualstudio.com/manage](https://marketplace.visualstudio.com/manage).
 
 ```yaml
 jobs:
@@ -234,7 +245,7 @@ each change.
 (`bash -e`, the step's own `env:` names) against throwaway git repos and
 fixtures: the CI gate's scope, budget and docs checks, the release PR's
 version bump, PR list and changelog splice, the release's changelog cut and
-Marketplace gates, the sync's refused-push fallback, the mention hook's guard.
+Marketplace publish, the sync's refused-push fallback, the mention hook's guard.
 `test/workflows.test.js` pins what every file here follows: `workflow_call`
 only, secrets declared by name, a timeout on every job, a full commit SHA on
 every GitHub-owned action, nothing under `chrisgriffin/ops/.github`.
