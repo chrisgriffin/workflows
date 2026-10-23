@@ -58,20 +58,13 @@ describe("the token that pushes", () => {
     expect(mergeStep().env.GH_TOKEN).toBe(FALLBACK)
   })
 
-  // ops#1685: no credential persisted into .git/config; each fetch and push
-  // authenticates per command, as the release PR's push does.
-  it("is never persisted — every fetch and push carries it as a header", () => {
+  // ops#1685: no credential persisted into .git/config; that each fetch and
+  // push then carries its own is pinned for every body in workflows.test.js.
+  it("is never persisted into .git/config", () => {
     const checkout = steps.find(s =>
       String(s.uses).startsWith("actions/checkout"),
     )
     expect(checkout.with["persist-credentials"]).toBe(false)
-    const commands =
-      `${steps.find(s => s.id === "check").run}\n${mergeStep().run}`
-        .split("\n")
-        .filter(l => !l.trim().startsWith("#"))
-    for (const l of commands.filter(l => /git\b.*\b(push|fetch)\b/.test(l))) {
-      expect(l).toContain('-c "http.extraheader=AUTHORIZATION: basic $AUTH"')
-    }
   })
 })
 

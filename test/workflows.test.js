@@ -231,6 +231,30 @@ describe("this repo's own stubs call the bodies here at develop (README § Versi
   })
 })
 
+// Every body's checkout persists no credential (ops#1685), so git holds no
+// token: a fetch or push that does not carry its own header asks for a
+// username, and on a private caller dies with exit 128 (ops#1702). A public
+// caller's anonymous fetch succeeds, which is how the release PR's fetch
+// passed this repo's own run and failed every private target's.
+describe("every git call that reaches the remote carries its own credential", () => {
+  const calls = BODIES.flatMap(file =>
+    Object.values(load(file).jobs)
+      .flatMap(job => job.steps || [])
+      .flatMap(s => (s.run || "").split("\n"))
+      .filter(l => !l.trim().startsWith("#"))
+      .filter(l => /\bgit\b.*\b(fetch|push|pull|ls-remote|clone)\b/.test(l))
+      .map(l => [`${file}: ${l.trim()}`, l]),
+  )
+
+  it("finds the git calls", () => {
+    expect(calls.length).toBeGreaterThan(3)
+  })
+
+  test.each(calls)("%s", (_, line) => {
+    expect(line).toContain('-c "http.extraheader=AUTHORIZATION: basic $AUTH"')
+  })
+})
+
 // A job with no `timeout-minutes` inherits GitHub's six-hour default; one
 // hung release step billed 1,824 minutes in a 48-hour window before ops#450.
 // `uses:` jobs are exempt because GitHub rejects the key on them.

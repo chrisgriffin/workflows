@@ -141,15 +141,34 @@ jobs:
 When a `release/*` or `hotfix/*` PR merges into `main`: reads the version from
 `package.json`, cuts that version's changelog section, creates the Release and
 tag, and optionally attaches assets, publishes an npm package, or publishes a
-VS Code extension to the Marketplace.
+VS Code extension to the Marketplace and Open VSX.
 
 - Inputs: `node_version` (`22`), `build_command`, `release_assets`,
   `npm_registry_url`, `npm_scope` (`@chrisgriffin`), `marketplace_packages`
   (all but the first two defaults empty: the bare path), `floating_major_tag`
   (`false`; `true` also moves the `vX` tag onto the release, for a repo
   other repos `uses:` by tag).
-- Secrets: `VSCE_PAT` (only with `marketplace_packages`).
+- Secrets: `VSCE_PAT` and `OVSX_PAT` (only with `marketplace_packages`).
 - The stub grants `contents: write` (`packages: write` to publish a package).
+- Publishing is its own job, after the release: it downloads the Release's
+  assets matching `marketplace_packages` and publishes them to each registry
+  it has a token for, with `vsce publish --skip-duplicate` and
+  `ovsx publish --skip-duplicate`. A registry with no token is skipped with a
+  notice; the two are independent, and the job fails if either publish
+  failed. A failed publish is retried by re-running the run; the job reads
+  the `.vsix` back off the Release, which already exists, and a version
+  already on a registry counts as published.
+- `VSCE_PAT` is a global Azure DevOps PAT (organization "All accessible
+  organizations"), which Microsoft retires on 2026-12-01. After that the PAT
+  stops working; remove the secret, and the caller uploads the Release's
+  `.vsix` by hand with "Update" on its extension at
+  [marketplace.visualstudio.com/manage](https://marketplace.visualstudio.com/manage).
+- `OVSX_PAT` is an Open VSX access token, from the caller's
+  [open-vsx.org](https://open-vsx.org) user settings. The namespace must
+  already exist and match the extension's `publisher`
+  (`npx ovsx create-namespace <publisher>` once, with the token). Open VSX
+  needs only a free account (an Eclipse account and its publisher
+  agreement), no card or paid account.
 
 ```yaml
 jobs:
@@ -164,6 +183,7 @@ jobs:
       marketplace_packages: ./*.vsix
     secrets:
       VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      OVSX_PAT: ${{ secrets.OVSX_PAT }}
 ```
 
 ## `_reusable-sync-main-to-develop.yml` — the merge-back
@@ -234,7 +254,7 @@ each change.
 (`bash -e`, the step's own `env:` names) against throwaway git repos and
 fixtures: the CI gate's scope, budget and docs checks, the release PR's
 version bump, PR list and changelog splice, the release's changelog cut and
-Marketplace gates, the sync's refused-push fallback, the mention hook's guard.
+Marketplace publish, the sync's refused-push fallback, the mention hook's guard.
 `test/workflows.test.js` pins what every file here follows: `workflow_call`
 only, secrets declared by name, a timeout on every job, a full commit SHA on
 every GitHub-owned action, nothing under `chrisgriffin/ops/.github`.
