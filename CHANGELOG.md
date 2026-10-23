@@ -4,6 +4,17 @@ Every release of the fleet's shared workflows. Each entry is generated from
 the conventional-commit history by the release PR; a caller pinned to the
 floating `v1` tag receives every entry under that major on merge.
 
+## [1.2.0](https://github.com/chrisgriffin/workflows/compare/v1.1.0...v1.2.0) (2026-10-22)
+
+### Features
+
+- **ci:** publish VS Code extensions to Open VSX on release ([a481b9d](https://github.com/chrisgriffin/workflows/commit/a481b9dc433da8089136638e6665702b964e5ce1)), closes [#18](https://github.com/chrisgriffin/workflows/issues/18)
+
+### Bug Fixes
+
+- **ci:** authenticate the release PR's fetches on a private caller ([15bdb37](https://github.com/chrisgriffin/workflows/commit/15bdb37f6f8918663104023da04f648369939e14))
+- **ci:** let a re-run retry a failed Marketplace publish ([df0115c](https://github.com/chrisgriffin/workflows/commit/df0115c3be414e677fb9d29e5248f53035f8d2f1)), closes [#16](https://github.com/chrisgriffin/workflows/issues/16)
+
 ## 1.1.0 (2026-10-21)
 
 ### Features

@@ -1,6 +1,6 @@
 {
   "name": "workflows",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "The reusable GitHub Actions workflows and composite actions every repo in the fleet calls. The version is what release-pr.yml bumps and create-github-release.yml tags.",
   "scripts": {
