@@ -80,10 +80,10 @@ on:
         default: "@chrisgriffin"
       marketplace_packages:
         description: >-
-          Glob of packaged VS Code extensions (`./*.vsix`) to publish to the
-          VS Code Marketplace right after the release, in the same job, with
-          the caller's `VSCE_PAT` secret. Empty (the default) publishes
-          nothing.
+          Glob of packaged VS Code extensions (`./*.vsix`), matched against
+          the Release's own assets, to publish to the VS Code Marketplace
+          after the release with the caller's `VSCE_PAT` secret. Empty (the
+          default) publishes nothing.
         required: false
         type: string
         default: ""
@@ -100,9 +100,10 @@ on:
     secrets:
       VSCE_PAT:
         description: >-
-          The VS Code Marketplace publisher token, read only when
-          `marketplace_packages` is set. A caller publishing nothing passes
-          nothing.
+          The VS Code Marketplace publisher token, a global Azure DevOps PAT,
+          read only when `marketplace_packages` is set. A caller publishing
+          nothing passes nothing. Microsoft retires global PATs on
+          2026-12-01 (README).
         required: false
 
 jobs:
@@ -122,6 +123,8 @@ jobs:
        startsWith(github.event.pull_request.head.ref, 'hotfix/'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       # Shallow on purpose: this job reads package.json and CHANGELOG.md at
       # HEAD, and `gh release create` tags server-side — nothing walks
@@ -279,42 +282,58 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # ops#1358. Publishes the .vsix the Release above already carries to the
-      # VS Code Marketplace, in this same job for the same GITHUB_TOKEN
-      # recursion reason as `Publish package`, and from the same file so the
-      # listing is byte-identical to the attachment.
-      #
-      # Which repo publishes is the caller's `marketplace_packages` input:
-      # this file is public and shared across repos, so it carries no
-      # per-repo table. A caller passing nothing publishes nothing.
-      #
-      # Both gates live INSIDE the step, not in a step-level `if:` — a secret
-      # in an `if:` skips the step with no log line, and "not an extension
-      # repo" and "no PAT yet" must never read the same, or the day the PAT
-      # lands nobody can tell whether publishing started. Each skip says which
-      # and exits 0. Past both gates `vsce publish` is unguarded: an expired
-      # PAT or a version already on the Marketplace reds the release, because
-      # a swallowed failure would look exactly like the no-op.
-      #
-      # `VSCE_PAT` reaches this step through the caller's named `secrets:`
-      # entry and vsce reads it from the environment, so the token is never on a
-      # command line. vsce is pinned to an exact 3.x, the major the fleet's
-      # extension packages with.
+  # ops#1358. Publishes the .vsix the Release above carries to the VS Code
+  # Marketplace, downloaded from that Release by version so the listing is
+  # byte-identical to the attachment. Chained by `needs:` in this same run, not
+  # a separate workflow on `release: published`, for the GITHUB_TOKEN
+  # recursion reason at the top of this file.
+  #
+  # Its own job, and NOT gated on the release job's `skip` (#16). It was a
+  # step after `gh release create` behind that gate, so a failed publish left
+  # the Release behind and a re-run saw it, skipped, and never retried. Now a
+  # re-run, of the failed jobs or of all of them, reaches this job either way:
+  # a release job that re-runs finds the Release made, skips, and this job
+  # still publishes that Release's .vsix. vsce's `--skip-duplicate` makes a
+  # version already on the Marketplace a green no-op, so a retry after a
+  # partial success, or a hotfix that bumped nothing, is never red for that
+  # alone; any other vsce failure is.
+  #
+  # Which repo publishes is the caller's `marketplace_packages` input: this
+  # file is public and shared across repos, so it carries no per-repo table.
+  # A caller passing nothing never starts the job. "No PAT yet" is gated
+  # INSIDE the step, not in an `if:` — a secret in an `if:` skips with no log
+  # line — and says so in a notice and exits 0, so the day the PAT lands it is
+  # visible that publishing started.
+  #
+  # `VSCE_PAT` reaches the step through the caller's named `secrets:` entry
+  # and vsce reads it from the environment, so the token is never on a command
+  # line. vsce is pinned to an exact 3.x, the major the fleet's extension
+  # packages with.
+  marketplace:
+    needs: release
+    if: inputs.marketplace_packages != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: ${{ inputs.node_version }}
+
       - name: Publish to the VS Code Marketplace
-        if: steps.version.outputs.skip != 'true'
         env:
           REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.release.outputs.version }}
           PACKAGES: ${{ inputs.marketplace_packages }}
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
-          if [ -z "$PACKAGES" ]; then
-            echo "Marketplace publish skipped: $REPO passes no marketplace_packages."
-            exit 0
-          fi
           if [ -z "$VSCE_PAT" ]; then
             echo "::notice::Marketplace publish skipped: no VSCE_PAT secret on $REPO."
             exit 0
           fi
+          DIR=$(mktemp -d)
+          gh release download "v$VERSION" --repo "$REPO" --dir "$DIR"
+          cd "$DIR"
           # $PACKAGES is deliberately unquoted: a glob from the caller's input.
           # shellcheck disable=SC2086
-          npx --yes @vscode/vsce@3.9.2 publish --packagePath $PACKAGES
+          npx --yes @vscode/vsce@3.9.2 publish --skip-duplicate --packagePath $PACKAGES
