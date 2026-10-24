@@ -83,8 +83,9 @@ on:
           Glob of packaged VS Code extensions (`./*.vsix`), matched against
           the Release's own assets, to publish after the release to the VS
           Code Marketplace with the caller's `VSCE_PAT` secret and to Open
-          VSX with its `OVSX_PAT` secret. Empty (the default) publishes
-          nothing.
+          VSX with its `OVSX_PAT` secret, or with trusted publishing when it
+          passes none and grants `id-token: write`. Empty (the default)
+          publishes nothing.
         required: false
         type: string
         default: ""
@@ -110,8 +111,8 @@ on:
         description: >-
           An Open VSX (open-vsx.org) access token, read only when
           `marketplace_packages` is set. Its namespace must already exist and
-          match the extension's publisher. A caller publishing nothing passes
-          nothing.
+          match the extension's publisher. A caller publishing nothing, or
+          publishing with trusted publishing, passes nothing.
         required: false
 
 jobs:
@@ -321,6 +322,12 @@ jobs:
   # and its tool reads it from the environment (`VSCE_PAT`, `OVSX_PAT`), so
   # no token is ever on a command line. vsce is pinned to an exact 3.x, the
   # major the fleet's extension packages with, and ovsx to an exact version.
+  #
+  # #22. With no `OVSX_PAT`, a caller granting `id-token: write` publishes to
+  # Open VSX by trusted publishing instead: no stored secret. Open VSX matches
+  # its registration on the ID token's `workflow_ref`, the caller's stub, so
+  # the stub's filename is what gets registered. The grant is the caller's
+  # alone: this file still has no `permissions:` key (see the release job).
   marketplace:
     needs: release
     if: inputs.marketplace_packages != ''
@@ -340,8 +347,10 @@ jobs:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
         run: |
-          if [ -z "$VSCE_PAT" ] && [ -z "$OVSX_PAT" ]; then
-            echo "::notice::Marketplace publish skipped: no VSCE_PAT or OVSX_PAT secret on $REPO."
+          # Set by the runner only when the caller grants `id-token: write`.
+          OIDC="${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+          if [ -z "$VSCE_PAT" ] && [ -z "$OVSX_PAT" ] && [ -z "$OIDC" ]; then
+            echo "::notice::Marketplace publish skipped: no VSCE_PAT or OVSX_PAT secret, and no id-token: write, on $REPO."
             exit 0
           fi
           DIR=$(mktemp -d)
@@ -356,12 +365,19 @@ jobs:
             env -u OVSX_PAT npx --yes @vscode/vsce@3.9.2 publish --skip-duplicate --packagePath $PACKAGES \
               || FAILED="$FAILED VS-Code-Marketplace"
           fi
-          if [ -z "$OVSX_PAT" ]; then
-            echo "::notice::Open VSX publish skipped: no OVSX_PAT secret on $REPO."
-          else
+          if [ -n "$OVSX_PAT" ]; then
             # shellcheck disable=SC2086
             env -u VSCE_PAT npx --yes ovsx@1.3.0 publish --skip-duplicate --packagePath $PACKAGES \
               || FAILED="$FAILED Open-VSX"
+          elif [ -n "$OIDC" ]; then
+            # #22: trusted publishing, the run's OIDC ID token traded for a
+            # short-lived publishing token; the flag fails rather than falls
+            # back when the exchange does.
+            # shellcheck disable=SC2086
+            env -u VSCE_PAT npx --yes ovsx@1.3.0 publish --trusted-publishing --skip-duplicate --packagePath $PACKAGES \
+              || FAILED="$FAILED Open-VSX"
+          else
+            echo "::notice::Open VSX publish skipped: no OVSX_PAT secret, and no id-token: write, on $REPO."
           fi
           if [ -n "$FAILED" ]; then
             echo "::error::Publish failed:$FAILED"

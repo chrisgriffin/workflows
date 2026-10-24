@@ -154,13 +154,14 @@ VS Code extension to the Marketplace and Open VSX.
   (all but the first two defaults empty: the bare path), `floating_major_tag`
   (`false`; `true` also moves the `vX` tag onto the release, for a repo
   other repos `uses:` by tag).
-- Secrets: `VSCE_PAT` and `OVSX_PAT` (only with `marketplace_packages`).
+- Secrets: `VSCE_PAT` and `OVSX_PAT` (only with `marketplace_packages`;
+  `OVSX_PAT` not with trusted publishing, below).
 - The stub grants `contents: write` (`packages: write` to publish a package).
 - Publishing is its own job, after the release: it downloads the Release's
   assets matching `marketplace_packages` and publishes them to each registry
   it has a token for, with `vsce publish --skip-duplicate` and
-  `ovsx publish --skip-duplicate`. A registry with no token is skipped with a
-  notice; the two are independent, and the job fails if either publish
+  `ovsx publish --skip-duplicate`. A registry with no way to publish is
+  skipped with a notice; the two are independent, and the job fails if either publish
   failed. A failed publish is retried by re-running the run; the job reads
   the `.vsix` back off the Release, which already exists, and a version
   already on a registry counts as published.
@@ -175,6 +176,15 @@ VS Code extension to the Marketplace and Open VSX.
   (`npx ovsx create-namespace <publisher>` once, with the token). Open VSX
   needs only a free account (an Eclipse account and its publisher
   agreement), no card or paid account.
+- Open VSX trusted publishing replaces `OVSX_PAT` with the run's GitHub
+  OIDC ID token, so no secret is stored. Open VSX requires the first version
+  to be published with a token. After that, register the caller's stub
+  under Settings > Trusted Publishers on open-vsx.org, using the stub's
+  owner, repository and filename (for example
+  `create-github-release.yml`). Then grant `id-token: write` beside
+  `contents: write` in the stub and stop passing `OVSX_PAT`. A token, when
+  passed, still wins. Open VSX trusts any ref that runs the registered
+  stub.
 
 ```yaml
 jobs:
