@@ -159,7 +159,8 @@ VS Code extension to the Marketplace and Open VSX.
 - The stub grants `contents: write` (`packages: write` to publish a package).
 - Publishing is its own job, after the release: it downloads the Release's
   assets matching `marketplace_packages` and publishes them to each registry
-  it has a token for, with `vsce publish --skip-duplicate` and
+  it can publish to: the Marketplace with `VSCE_PAT`, Open VSX with
+  `OVSX_PAT` or trusted publishing, with `vsce publish --skip-duplicate` and
   `ovsx publish --skip-duplicate`. A registry with no way to publish is
   skipped with a notice; the two are independent, and the job fails if either publish
   failed. A failed publish is retried by re-running the run; the job reads
