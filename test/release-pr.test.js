@@ -519,7 +519,12 @@ describe("_reusable-release-pr.yml — the RELEASE_AS repository variable", () =
   test.each([
     ["unset: the commit bump", "", "0.31.0", /Bump: minor/],
     ["1.0.0 from 0.30.2", "1.0.0", "1.0.0", /RELEASE_AS=1\.0\.0 overrides/],
-    ["stale 0.1.0", "0.1.0", "0.31.0", /RELEASE_AS=0\.1\.0 is not above 0\.30\.2.*ignored/],
+    [
+      "stale 0.1.0",
+      "0.1.0",
+      "0.31.0",
+      /RELEASE_AS=0\.1\.0 is not above 0\.30\.2.*ignored/,
+    ],
     [
       "at or below the commit bump",
       "0.30.5",

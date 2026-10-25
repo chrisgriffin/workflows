@@ -225,7 +225,13 @@ describe("the marketplace job", () => {
   // with `gh` and `npx` stubbed: `gh release download` drops the Release's
   // .vsix into --dir; npx logs each tool's arguments and the tokens it saw,
   // and exits with that tool's code.
-  function runStep({ vsce = "", ovsx = "", oidc = false, vsceExit = 0, ovsxExit = 0 }) {
+  function runStep({
+    vsce = "",
+    ovsx = "",
+    oidc = false,
+    vsceExit = 0,
+    ovsxExit = 0,
+  }) {
     const bin = mkdtempSync(join(os.tmpdir(), "marketplace-bin-"))
     const log = join(bin, "calls.log")
     writeFileSync(log, "")
@@ -317,7 +323,9 @@ describe("the marketplace job", () => {
   it("skips green with a notice when there is no token, without reaching gh or npx", () => {
     const r = runStep({})
     expect(r.status).toBe(0)
-    expect(r.out).toMatch(/::notice::.*no VSCE_PAT or OVSX_PAT secret, and no id-token: write, on o\/r/)
+    expect(r.out).toMatch(
+      /::notice::.*no VSCE_PAT or OVSX_PAT secret, and no id-token: write, on o\/r/,
+    )
     expect(r.calls).toBe("")
   })
 
@@ -418,7 +426,8 @@ describe("the marketplace job", () => {
 
     it("adds no permissions: key, so the caller's grant is the only switch", () => {
       expect(doc.permissions).toBeUndefined()
-      for (const j of Object.values(doc.jobs)) expect(j.permissions).toBeUndefined()
+      for (const j of Object.values(doc.jobs))
+        expect(j.permissions).toBeUndefined()
     })
   })
 
