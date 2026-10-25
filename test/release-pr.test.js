@@ -261,6 +261,26 @@ describe("_reusable-release-pr.yml — self-contained changelog tooling", () => 
     )
   })
 
+  // #27 — a repo's first release can come before it has a CHANGELOG.md at
+  // all; the splice used to read the missing file and fail the run. Runs the
+  // step's lines from the missing-file check through the `mv`, pulled out of
+  // the workflow so a change to its copy fails this.
+  it("a repo with no CHANGELOG.md gets one: the title, then the new entry", () => {
+    const block = text.match(
+      /\n( +\[ -f CHANGELOG\.md \][\s\S]*?mv CHANGELOG\.md\.new CHANGELOG\.md)\n/,
+    )[1]
+    const dir = mkdtempSync(join(os.tmpdir(), "release-pr-first-"))
+    const r = spawnSync("bash", ["-e", "-c", block], {
+      cwd: dir,
+      encoding: "utf8",
+      env: { ...process.env, NEW_ENTRY: "## 1.0.0 (2026-10-25)" },
+    })
+    expect(r.status).toBe(0)
+    expect(readFileSync(join(dir, "CHANGELOG.md"), "utf8")).toBe(
+      "# Changelog\n\n## 1.0.0 (2026-10-25)\n",
+    )
+  })
+
   it("reformats the spliced changelog with Prettier before committing", () => {
     expect(text).toContain(
       "/tmp/rp-tools/node_modules/.bin/prettier --write CHANGELOG.md",
