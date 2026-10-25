@@ -258,10 +258,14 @@ and `sync-main-to-develop.yml` (§ Versions). `build-check.yml` is a plain
 job named `build / ci` (the check every target's ruleset requires; a plain
 job's check-run is its job name alone), that downloads an exact `actionlint` release, checks its sha256
 against the published checksum, lints every workflow here with shellcheck,
-and runs `npm test` (§ Tests); a plain job rather than a call of
-`_reusable-node-ci.yml`, since that body is one of the files under test.
-`package.json` carries the version the release flow bumps and the test
-suite's two dev dependencies. `specs/` holds the spec, plan and tasks behind
+runs `npm run format:check` and `npm run lint`, and runs `npm test`
+(§ Tests); a plain job rather than a call of `_reusable-node-ci.yml`, since
+that body is one of the files under test. `npm run verify` is the same chain
+less actionlint. `package.json` carries the version the release flow bumps,
+the test suite's dev dependencies, and
+[chrisgriffin/config](https://github.com/chrisgriffin/config) at `#v1`:
+Prettier reads its config (`"prettier": "@chrisgriffin/config/prettier"`)
+and `eslint.config.mjs` spreads its ESLint base first. `specs/` holds the spec, plan and tasks behind
 each change.
 
 ## Tests

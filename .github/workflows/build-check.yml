@@ -1,10 +1,11 @@
 name: build
 
 # This repo's CI: every workflow and action here is valid GitHub Actions
-# syntax, with shellcheck over every `run:` block, then the suite under
-# test/ runs each body's shell against fixtures (README § Tests). A plain
-# job rather than a call of _reusable-node-ci.yml: it is two steps, and the
-# body it would call is one of the files under test. The job's `name:` is
+# syntax, with shellcheck over every `run:` block, every file is formatted
+# and linted on chrisgriffin/config's shared Prettier and ESLint configs,
+# then the suite under test/ runs each body's shell against fixtures
+# (README § Tests). A plain job rather than a call of _reusable-node-ci.yml:
+# the body it would call is one of the files under test. The job's `name:` is
 # `build / ci`, the check every target's ruleset requires: a plain job's
 # check-run carries the job name alone, never `<workflow> / <job>`; only a
 # `uses:` call reports as `<caller job> / <callee job>`.
@@ -53,6 +54,12 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      - name: Every file formatted with the fleet's Prettier config
+        run: npm run format:check
+
+      - name: ESLint on the fleet's base config
+        run: npm run lint
 
       - name: Run every body's shell against fixtures
         run: npm test

@@ -4,13 +4,22 @@
   "private": true,
   "description": "The reusable GitHub Actions workflows and composite actions every repo in the fleet calls. The version is what release-pr.yml bumps and create-github-release.yml tags.",
   "scripts": {
-    "test": "jest"
+    "test": "jest",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "verify": "npm run format:check && npm run lint && npm test"
   },
+  "prettier": "@chrisgriffin/config/prettier",
   "jest": {
     "testEnvironment": "node"
   },
   "devDependencies": {
+    "@chrisgriffin/config": "github:chrisgriffin/config#v1",
+    "eslint": "^9.39.5",
+    "globals": "^17.13.0",
     "jest": "^30.2.0",
-    "js-yaml": "^5.2.3"
+    "js-yaml": "^5.2.3",
+    "prettier": "^3.9.10"
   }
 }
