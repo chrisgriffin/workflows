@@ -255,6 +255,31 @@ describe("_reusable-release-pr.yml — self-contained changelog tooling", () => 
     )
   })
 
+  it("a repo with no CHANGELOG yet gets one titled `# Changelog` before the splice runs (workflows#26)", () => {
+    const create = text.match(/^ +(\[ -f CHANGELOG\.md \] \|\| .*)$/m)
+    expect(create).not.toBeNull()
+    // The creation runs before the splice reads the file.
+    expect(text.indexOf(create[1])).toBeLessThan(
+      text.indexOf('awk -v new="$NEW_ENTRY"'),
+    )
+    const dir = mkdtempSync(join(os.tmpdir(), "release-pr-no-changelog-"))
+    const r = spawnSync("bash", ["-c", create[1]], {
+      cwd: dir,
+      encoding: "utf8",
+    })
+    expect(r.status).toBe(0)
+    const made = readFileSync(join(dir, "CHANGELOG.md"), "utf8")
+    expect(made).toBe("# Changelog\n")
+    // ...and the splice then puts the first entry under that title.
+    expect(splice(made)).toBe("# Changelog\n\n## 0.2.0 (2026-10-01)\n")
+    // An existing changelog is left as it was.
+    writeFileSync(join(dir, "CHANGELOG.md"), "# Changelog\n\n## 0.1.0\n")
+    spawnSync("bash", ["-c", create[1]], { cwd: dir })
+    expect(readFileSync(join(dir, "CHANGELOG.md"), "utf8")).toBe(
+      "# Changelog\n\n## 0.1.0\n",
+    )
+  })
+
   it("a changelog with an earlier entry gains the new one above it, below the title", () => {
     expect(splice("# Changelog\n\n## 0.1.0 (2026-09-01)\n\n- first\n")).toBe(
       "# Changelog\n\n## 0.2.0 (2026-10-01)\n\n## 0.1.0 (2026-09-01)\n\n- first\n",

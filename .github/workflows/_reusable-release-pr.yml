@@ -514,6 +514,10 @@ jobs:
           # version header to splice before: the entry goes after the title
           # instead of being dropped (ops#1241).
           NEW_ENTRY=$(/tmp/rp-tools/node_modules/.bin/conventional-changelog -n /tmp/rp-tools/changelog-preset.config.mjs -r 1)
+          # A repo with no CHANGELOG.md yet gets one with just the title, so
+          # the splice below puts the first entry under it; awk on a missing
+          # file exits 2 and the release PR never opens (workflows#26).
+          [ -f CHANGELOG.md ] || printf '# Changelog\n' > CHANGELOG.md
           # `###?`, not the `#{2,3}` interval that says the same thing: mawk
           # 1.3.4 20240123 ignores an interval's upper bound, so a `###` patch
           # heading never matches and the new entry is silently dropped rather
