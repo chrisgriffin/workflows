@@ -4,6 +4,21 @@ Every release of the fleet's shared workflows. Each entry is generated from
 the conventional-commit history by the release PR; a caller pinned to the
 floating `v1` tag receives every entry under that major on merge.
 
+## [1.4.0](https://github.com/chrisgriffin/workflows/compare/v1.3.0...v1.4.0) (2026-10-24)
+
+### Features
+
+- **release:** publish to Open VSX with trusted publishing ([f03c08f](https://github.com/chrisgriffin/workflows/commit/f03c08f0fb8237cc4c2c72dd05ab028d9fb44f08)), closes [#22](https://github.com/chrisgriffin/workflows/issues/22)
+
+### Bug Fixes
+
+- **release-pr:** start CHANGELOG.md on a repo's first release ([63f23d0](https://github.com/chrisgriffin/workflows/commit/63f23d06d9d741120fddc3af1e8a1b2020e69670)), closes [#27](https://github.com/chrisgriffin/workflows/issues/27)
+
+### Documentation
+
+- **readme:** name both ways the publish job reaches Open VSX ([755fb38](https://github.com/chrisgriffin/workflows/commit/755fb38e779e998f98ae1b7fea83b226edab0d4a))
+- **spec:** mark the config re-run as the after-merge task ([5e58de2](https://github.com/chrisgriffin/workflows/commit/5e58de231eb2f4f068baf8e4faa729ddb28b4b2e))
+
 ## [1.3.0](https://github.com/chrisgriffin/workflows/compare/v1.2.0...v1.3.0) (2026-10-23)
 
 ### Features

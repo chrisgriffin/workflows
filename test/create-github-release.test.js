@@ -225,7 +225,7 @@ describe("the marketplace job", () => {
   // with `gh` and `npx` stubbed: `gh release download` drops the Release's
   // .vsix into --dir; npx logs each tool's arguments and the tokens it saw,
   // and exits with that tool's code.
-  function runStep({ vsce = "", ovsx = "", vsceExit = 0, ovsxExit = 0 }) {
+  function runStep({ vsce = "", ovsx = "", oidc = false, vsceExit = 0, ovsxExit = 0 }) {
     const bin = mkdtempSync(join(os.tmpdir(), "marketplace-bin-"))
     const log = join(bin, "calls.log")
     writeFileSync(log, "")
@@ -249,6 +249,11 @@ describe("the marketplace job", () => {
         PACKAGES: "./*.vsix",
         VSCE_PAT: vsce,
         OVSX_PAT: ovsx,
+        // Set by the runner only when the job's token has `id-token: write`.
+        ...(oidc && {
+          ACTIONS_ID_TOKEN_REQUEST_URL: "https://token.example/oidc",
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: "req",
+        }),
       },
     })
     return {
@@ -312,7 +317,7 @@ describe("the marketplace job", () => {
   it("skips green with a notice when there is no token, without reaching gh or npx", () => {
     const r = runStep({})
     expect(r.status).toBe(0)
-    expect(r.out).toMatch(/::notice::.*no VSCE_PAT or OVSX_PAT secret on o\/r/)
+    expect(r.out).toMatch(/::notice::.*no VSCE_PAT or OVSX_PAT secret, and no id-token: write, on o\/r/)
     expect(r.calls).toBe("")
   })
 
@@ -340,7 +345,7 @@ describe("the marketplace job", () => {
       { vsce: "v-pat" },
       VSCE,
       OVSX,
-      /Open VSX publish skipped: no OVSX_PAT/,
+      /Open VSX publish skipped: no OVSX_PAT secret, and no id-token: write, on o\/r/,
     ],
   ])(
     "with no %s, skips that registry with a notice and still publishes the other",
@@ -373,6 +378,49 @@ describe("the marketplace job", () => {
       expect(r.calls).toMatch(OVSX)
     },
   )
+
+  // #22 — Open VSX trusted publishing: with no OVSX_PAT, a caller granting
+  // `id-token: write` publishes with the run's OIDC ID token, so it stores
+  // no secret. A token still wins: an extension's first version needs one.
+  const TRUSTED =
+    /^npx --yes ovsx@\d+\.\d+\.\d+ publish --trusted-publishing --skip-duplicate --packagePath \.\/ext-0\.1\.0\.vsix /m
+
+  describe("trusted publishing", () => {
+    it("publishes to Open VSX with the ID token when there is no OVSX_PAT", () => {
+      const r = runStep({ vsce: "v-pat", oidc: true })
+      expect(r.status).toBe(0)
+      expect(r.calls).toMatch(TRUSTED)
+      expect(r.calls).toMatch(/ovsx@.* vsce_pat= ovsx_pat=$/m)
+      expect(r.out).not.toMatch(/Open VSX publish skipped/)
+    })
+
+    it("needs no token at all: the ID token alone gets past the early skip", () => {
+      const r = runStep({ oidc: true })
+      expect(r.status).toBe(0)
+      expect(r.calls).toMatch(/^gh release download v0\.1\.0 /m)
+      expect(r.calls).toMatch(TRUSTED)
+      expect(r.out).toMatch(/VS Code Marketplace publish skipped: no VSCE_PAT/)
+    })
+
+    it("uses OVSX_PAT when both are there, so a first publish still works", () => {
+      const r = runStep({ ovsx: "o-pat", oidc: true })
+      expect(r.status).toBe(0)
+      expect(r.calls).toMatch(OVSX)
+      expect(r.calls).not.toMatch(/--trusted-publishing/)
+    })
+
+    it("reds the job when the trusted publish fails, without skipping the Marketplace", () => {
+      const r = runStep({ vsce: "v-pat", oidc: true, ovsxExit: 1 })
+      expect(r.status).not.toBe(0)
+      expect(r.out).toMatch(/Publish failed: Open-VSX$/m)
+      expect(r.calls).toMatch(VSCE)
+    })
+
+    it("adds no permissions: key, so the caller's grant is the only switch", () => {
+      expect(doc.permissions).toBeUndefined()
+      for (const j of Object.values(doc.jobs)) expect(j.permissions).toBeUndefined()
+    })
+  })
 
   it("reds the job when both publishes fail, and never swallows a failure", () => {
     const r = runStep({ vsce: "v", ovsx: "o", vsceExit: 1, ovsxExit: 1 })
