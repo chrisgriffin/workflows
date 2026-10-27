@@ -4,6 +4,24 @@ Every release of the fleet's shared workflows. Each entry is generated from
 the conventional-commit history by the release PR; a caller pinned to the
 floating `v1` tag receives every entry under that major on merge.
 
+## [1.5.0](https://github.com/chrisgriffin/workflows/compare/v1.4.0...v1.5.0) (2026-10-26)
+
+### Features
+
+- **release-pr:** a version_files input keeps manifests on the package version ([6769d43](https://github.com/chrisgriffin/workflows/commit/6769d4351a1d90bf04fd8eeaf4218d95ebe9e936)), closes [#34](https://github.com/chrisgriffin/workflows/issues/34)
+
+### Bug Fixes
+
+- **release-pr:** format CHANGELOG.md with a caller's packaged Prettier config ([d25b0b0](https://github.com/chrisgriffin/workflows/commit/d25b0b0544d12d285cca9d2ff1ff0240f7ae4ed0)), closes [#36](https://github.com/chrisgriffin/workflows/issues/36)
+
+### Documentation
+
+- **release-pr:** list version_files among the README's inputs ([b287e18](https://github.com/chrisgriffin/workflows/commit/b287e182ea6804c6710a3a695a6339ba215f95b3))
+
+### Build System
+
+- adopt the shared Prettier and ESLint configs ([e106d0f](https://github.com/chrisgriffin/workflows/commit/e106d0f059da82b53a4adf7ec901506849aa97c6))
+
 ## [1.4.0](https://github.com/chrisgriffin/workflows/compare/v1.3.0...v1.4.0) (2026-10-24)
 
 ### Features
