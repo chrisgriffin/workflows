@@ -118,7 +118,10 @@ into `main`: computes the conventional-commit bump, splices the changelog,
 lists the shipping PRs, and dispatches the operator's conflict sweep.
 
 - Inputs: `extra_build_command`, `extra_add_paths`, `extra_build_gate_command`
-  (all empty: no extra build artifact in the release commit).
+  (all empty: no extra build artifact in the release commit), and
+  `version_files` (empty: space-separated JSON files whose `"version"` value
+  is set in place to the new version and committed with the release; a file
+  with no `"version"` fails the step; it installs nothing).
 - Secrets: `RELEASE_PR_TOKEN` (a PAT, so the PR's checks fire),
   `OPS_GH_TOKEN` (the sweep dispatch), `NODE_AUTH_TOKEN` (optional).
 - Variables: `RELEASE_AS` (optional), an Actions variable on the calling
@@ -258,10 +261,14 @@ and `sync-main-to-develop.yml` (§ Versions). `build-check.yml` is a plain
 job named `build / ci` (the check every target's ruleset requires; a plain
 job's check-run is its job name alone), that downloads an exact `actionlint` release, checks its sha256
 against the published checksum, lints every workflow here with shellcheck,
-and runs `npm test` (§ Tests); a plain job rather than a call of
-`_reusable-node-ci.yml`, since that body is one of the files under test.
-`package.json` carries the version the release flow bumps and the test
-suite's two dev dependencies. `specs/` holds the spec, plan and tasks behind
+runs `npm run format:check` and `npm run lint`, and runs `npm test`
+(§ Tests); a plain job rather than a call of `_reusable-node-ci.yml`, since
+that body is one of the files under test. `npm run verify` is the same chain
+less actionlint. `package.json` carries the version the release flow bumps,
+the test suite's dev dependencies, and
+[chrisgriffin/config](https://github.com/chrisgriffin/config) at `#v1`:
+Prettier reads its config (`"prettier": "@chrisgriffin/config/prettier"`)
+and `eslint.config.mjs` spreads its ESLint base first. `specs/` holds the spec, plan and tasks behind
 each change.
 
 ## Tests

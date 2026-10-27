@@ -183,6 +183,62 @@ describe("_reusable-release-pr.yml — the extra_build_command hook", () => {
   })
 })
 
+// #34: a manifest that ships with the package (a plugin.json) follows its
+// version, set in place so the caller's Prettier layout survives.
+describe("_reusable-release-pr.yml — version_files", () => {
+  const block = text.match(
+    /\n( +for f in \$VERSION_FILES; do[\s\S]*?\n +done)\n/,
+  )[1]
+  const sync = files => {
+    const dir = mkdtempSync(join(os.tmpdir(), "release-pr-version-files-"))
+    for (const [f, body] of Object.entries(files)) {
+      mkdirSync(join(dir, f, ".."), { recursive: true })
+      writeFileSync(join(dir, f), body)
+    }
+    const r = spawnSync("bash", ["-e", "-c", block], {
+      cwd: dir,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        NEXT: "1.3.0",
+        VERSION_FILES: Object.keys(files).join(" "),
+      },
+    })
+    return { r, read: f => readFileSync(join(dir, f), "utf8") }
+  }
+
+  it("declares version_files as an optional, empty-default input", () => {
+    const inputs = text.split("workflow_call:")[1].split(/\npermissions:/)[0]
+    expect(inputs).toMatch(/version_files:[\s\S]*?default: ""/)
+  })
+
+  it("sets each file's version in place and leaves the rest byte for byte", () => {
+    const manifest =
+      '{\n  "name": "x",\n  "version": "1.2.3",\n  "keywords": ["a", "b"]\n}\n'
+    const { r, read } = sync({
+      ".claude-plugin/plugin.json": manifest,
+      "b/plugin.json": '{ "version":"0.1.0" }',
+    })
+    expect(r.status).toBe(0)
+    expect(read(".claude-plugin/plugin.json")).toBe(
+      manifest.replace("1.2.3", "1.3.0"),
+    )
+    expect(read("b/plugin.json")).toBe('{ "version":"1.3.0" }')
+  })
+
+  it("fails on a listed file with no version field, naming it", () => {
+    const { r } = sync({ "p.json": '{ "name": "x" }\n' })
+    expect(r.status).not.toBe(0)
+    expect(r.stdout + r.stderr).toContain("p.json")
+  })
+
+  it("commits the files with the release, and installs nothing for them", () => {
+    expect(commands).toMatch(/git add \$VERSION_FILES/)
+    const install = commands.match(/- if: (.*)\n +run: npm ci/)[1]
+    expect(install).not.toContain("version_files")
+  })
+})
+
 describe("_reusable-release-pr.yml — self-contained changelog tooling", () => {
   it("pins Node 22, not a per-repo version", () => {
     expect(text).toContain('node-version: "22"')
@@ -283,8 +339,51 @@ describe("_reusable-release-pr.yml — self-contained changelog tooling", () => 
 
   it("reformats the spliced changelog with Prettier before committing", () => {
     expect(text).toContain(
-      "/tmp/rp-tools/node_modules/.bin/prettier --write CHANGELOG.md",
+      '/tmp/rp-tools/node_modules/.bin/prettier ${RP_PRETTIER_CONFIG:+--config "$RP_PRETTIER_CONFIG"} --write CHANGELOG.md',
     )
+  })
+
+  // #36: a caller on a packaged Prettier config failed here with "Cannot
+  // find package", since its own install never runs in this job.
+  describe("a caller's packaged Prettier config", () => {
+    const parse = text.match(
+      /read -r CFG CFG_SPEC <<< "\$\(node -e '([\s\S]*?)'\)"/,
+    )[1]
+    const read = pkg => {
+      const dir = mkdtempSync(join(os.tmpdir(), "release-pr-prettier-"))
+      writeFileSync(join(dir, "package.json"), JSON.stringify(pkg))
+      const r = spawnSync("node", ["-e", parse], { cwd: dir, encoding: "utf8" })
+      expect(r.status).toBe(0)
+      return r.stdout.trim()
+    }
+
+    it("names the config and the package to install at the caller's own spec", () => {
+      expect(
+        read({
+          prettier: "@chrisgriffin/config/prettier",
+          devDependencies: {
+            "@chrisgriffin/config": "github:chrisgriffin/config#v1",
+          },
+        }),
+      ).toBe("@chrisgriffin/config/prettier github:chrisgriffin/config#v1")
+      expect(
+        read({
+          prettier: "shared-prettier",
+          devDependencies: { "shared-prettier": "^2.1.0" },
+        }),
+      ).toBe("shared-prettier shared-prettier@^2.1.0")
+    })
+
+    it("names nothing for a file config, an inline config or none", () => {
+      expect(read({ prettier: "./prettier.json" })).toBe("")
+      expect(read({ prettier: { semi: false } })).toBe("")
+      expect(read({})).toBe("")
+    })
+
+    it("installs it with the tools and points the format step at it", () => {
+      expect(commands).toMatch(/prettier@[\d.]+ \$CFG_SPEC\n/)
+      expect(commands).toContain('echo "RP_PRETTIER_CONFIG=')
+    })
   })
 
   it("uses pinned versions installed into the prefix, not a local devDependency, for every conventional-changelog call", () => {
@@ -519,7 +618,12 @@ describe("_reusable-release-pr.yml — the RELEASE_AS repository variable", () =
   test.each([
     ["unset: the commit bump", "", "0.31.0", /Bump: minor/],
     ["1.0.0 from 0.30.2", "1.0.0", "1.0.0", /RELEASE_AS=1\.0\.0 overrides/],
-    ["stale 0.1.0", "0.1.0", "0.31.0", /RELEASE_AS=0\.1\.0 is not above 0\.30\.2.*ignored/],
+    [
+      "stale 0.1.0",
+      "0.1.0",
+      "0.31.0",
+      /RELEASE_AS=0\.1\.0 is not above 0\.30\.2.*ignored/,
+    ],
     [
       "at or below the commit bump",
       "0.30.5",

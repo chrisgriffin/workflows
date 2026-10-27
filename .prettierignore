@@ -1,0 +1,7 @@
+# Laid by the operator at runtime and never tracked (.git/info/exclude):
+# ignored so a shift's own format check stays green.
+.agents/
+.specify/
+morning-briefing.md
+pm-briefing.md
+postcss.config.mjs
