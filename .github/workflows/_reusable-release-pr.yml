@@ -28,6 +28,9 @@ name: (reusable) Release PR
 # here instead of carrying its own copy of this whole file. Every other
 # caller passes neither and this step is a no-op.
 #
+# `version_files`: JSON files that ship at the package's version (a plugin
+# manifest). Their `"version"` value is set in place, no install, no hook.
+#
 # Secrets:
 #   RELEASE_PR_TOKEN   (optional) fine-grained PAT / GitHub App token used to
 #                      push release/next and open the PR. Must NOT be the
@@ -50,6 +53,15 @@ on:
         default: ""
       extra_add_paths:
         description: Extra paths to `git add` after extra_build_command runs (space-separated). Ignored if extra_build_command is empty.
+        type: string
+        required: false
+        default: ""
+      version_files:
+        description: >-
+          JSON files whose `"version"` value follows package.json
+          (space-separated), such as a plugin manifest. Set in place after the
+          bump, so the file keeps its own formatting, and committed with the
+          release. Needs no install.
         type: string
         required: false
         default: ""
@@ -483,6 +495,7 @@ jobs:
           EXTRA_BUILD_COMMAND: ${{ inputs.extra_build_command }}
           EXTRA_BUILD_NEEDED: ${{ steps.extra-build-gate.outputs.needed }}
           EXTRA_PATHS: ${{ inputs.extra_add_paths }}
+          VERSION_FILES: ${{ inputs.version_files }}
           # For the one `git push` at the end, and nowhere else: the checkout
           # persisted no credential, so the caller's build command runs in a
           # tree that holds no token.
@@ -491,6 +504,23 @@ jobs:
           git checkout -B "$BRANCH"
 
           npm version "$NEXT" --no-git-tag-version
+
+          # #34: only the version value changes. Re-serializing the file undid
+          # the caller's Prettier layout and failed its format:check.
+          # Unquoted: a space-separated list. The JS's `${...}` is not shell.
+          # shellcheck disable=SC2086,SC2016
+          for f in $VERSION_FILES; do
+            node -e '
+              const fs = require("fs"), [f, v] = process.argv.slice(1)
+              const re = /("version"\s*:\s*")[^"]*"/
+              const t = fs.readFileSync(f, "utf8")
+              if (!re.test(t)) {
+                console.log(`::error::${f} has no "version" field to set`)
+                process.exit(1)
+              }
+              fs.writeFileSync(f, t.replace(re, `$1${v}"`))
+            ' "$f" "$NEXT"
+          done
 
           # Repo-specific build step, if the caller set one — after the
           # version bump, before committing, exactly as extra_build_command's
@@ -543,6 +573,8 @@ jobs:
           if [ -n "$EXTRA_PATHS" ]; then
             git add $EXTRA_PATHS
           fi
+          # shellcheck disable=SC2086
+          [ -z "$VERSION_FILES" ] || git add $VERSION_FILES
           git commit -m "chore: release v${NEXT}"
           # The release token enters git here and only here, as a per-command
           # header (what actions/checkout would have persisted), so it is
