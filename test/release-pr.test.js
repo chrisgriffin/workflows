@@ -339,8 +339,51 @@ describe("_reusable-release-pr.yml — self-contained changelog tooling", () => 
 
   it("reformats the spliced changelog with Prettier before committing", () => {
     expect(text).toContain(
-      "/tmp/rp-tools/node_modules/.bin/prettier --write CHANGELOG.md",
+      '/tmp/rp-tools/node_modules/.bin/prettier ${RP_PRETTIER_CONFIG:+--config "$RP_PRETTIER_CONFIG"} --write CHANGELOG.md',
     )
+  })
+
+  // #36: a caller on a packaged Prettier config failed here with "Cannot
+  // find package", since its own install never runs in this job.
+  describe("a caller's packaged Prettier config", () => {
+    const parse = text.match(
+      /read -r CFG CFG_SPEC <<< "\$\(node -e '([\s\S]*?)'\)"/,
+    )[1]
+    const read = pkg => {
+      const dir = mkdtempSync(join(os.tmpdir(), "release-pr-prettier-"))
+      writeFileSync(join(dir, "package.json"), JSON.stringify(pkg))
+      const r = spawnSync("node", ["-e", parse], { cwd: dir, encoding: "utf8" })
+      expect(r.status).toBe(0)
+      return r.stdout.trim()
+    }
+
+    it("names the config and the package to install at the caller's own spec", () => {
+      expect(
+        read({
+          prettier: "@chrisgriffin/config/prettier",
+          devDependencies: {
+            "@chrisgriffin/config": "github:chrisgriffin/config#v1",
+          },
+        }),
+      ).toBe("@chrisgriffin/config/prettier github:chrisgriffin/config#v1")
+      expect(
+        read({
+          prettier: "shared-prettier",
+          devDependencies: { "shared-prettier": "^2.1.0" },
+        }),
+      ).toBe("shared-prettier shared-prettier@^2.1.0")
+    })
+
+    it("names nothing for a file config, an inline config or none", () => {
+      expect(read({ prettier: "./prettier.json" })).toBe("")
+      expect(read({ prettier: { semi: false } })).toBe("")
+      expect(read({})).toBe("")
+    })
+
+    it("installs it with the tools and points the format step at it", () => {
+      expect(commands).toMatch(/prettier@[\d.]+ \$CFG_SPEC\n/)
+      expect(commands).toContain('echo "RP_PRETTIER_CONFIG=')
+    })
   })
 
   it("uses pinned versions installed into the prefix, not a local devDependency, for every conventional-changelog call", () => {
