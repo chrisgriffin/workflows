@@ -118,7 +118,10 @@ into `main`: computes the conventional-commit bump, splices the changelog,
 lists the shipping PRs, and dispatches the operator's conflict sweep.
 
 - Inputs: `extra_build_command`, `extra_add_paths`, `extra_build_gate_command`
-  (all empty: no extra build artifact in the release commit).
+  (all empty: no extra build artifact in the release commit), and
+  `version_files` (empty: space-separated JSON files whose `"version"` value
+  is set in place to the new version and committed with the release; a file
+  with no `"version"` fails the step; it installs nothing).
 - Secrets: `RELEASE_PR_TOKEN` (a PAT, so the PR's checks fire),
   `OPS_GH_TOKEN` (the sweep dispatch), `NODE_AUTH_TOKEN` (optional).
 - Variables: `RELEASE_AS` (optional), an Actions variable on the calling
