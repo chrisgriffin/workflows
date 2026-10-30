@@ -90,6 +90,7 @@ jobs:
       EVALUATOR_FIRE_TOKEN: ${{ secrets.EVALUATOR_FIRE_TOKEN }}
       AUTOFIX_FIRE_TOKEN: ${{ secrets.AUTOFIX_FIRE_TOKEN }}
       OPS_GH_TOKEN: ${{ secrets.OPS_GH_TOKEN }}
+      RELEASE_PR_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
 ```
 
 ## `_reusable-claude-mention.yml` — the `@claude` responder

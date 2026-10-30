@@ -123,10 +123,17 @@ describe("_reusable-evaluator-gate.yml — one job running the gate action", () 
     // (ops#1914). Those writes are review-comment and GraphQL events, which
     // start no gate run, so the loop still cannot trigger itself. The
     // token goes nowhere else: no step of its own, no other env.
-    const uses = text.match(/RELEASE_PR_TOKEN/g) || []
-    expect(uses.length).toBeGreaterThan(0)
+    const releaseUses = text.match(/secrets\.RELEASE_PR_TOKEN\b/g) || []
+    expect(releaseUses).toHaveLength(1)
     expect(text).toMatch(
       /target-token: \$\{\{ secrets\.TARGET_TOKEN \|\| secrets\.RELEASE_PR_TOKEN \}\}/,
+    )
+    // ops's TARGET_TOKEN stands in for both: once in ops-token, once in
+    // target-token, and nowhere else.
+    const targetUses = text.match(/secrets\.TARGET_TOKEN\b/g) || []
+    expect(targetUses).toHaveLength(2)
+    expect(text).toMatch(
+      /ops-token: \$\{\{ secrets\.OPS_GH_TOKEN \|\| secrets\.TARGET_TOKEN \}\}/,
     )
     expect(FILES).not.toContain("_reusable-evaluator-autofix.yml")
   })

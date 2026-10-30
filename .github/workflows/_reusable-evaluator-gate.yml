@@ -22,10 +22,12 @@ name: (reusable) Evaluator Gate
 #   OPS_GH_TOKEN          # a token that can read chrisgriffin/ops (contents:
 #                         # read), where the gate script lives; ops itself
 #                         # has TARGET_TOKEN instead
+# Optional:
 #   RELEASE_PR_TOKEN      # a user token with pull-request write on the
 #                         # caller (TARGET_TOKEN in ops): the gate replies on
 #                         # inline finding threads and resolves them with it
-#                         # (ops#1919); without one the thread stays open
+#                         # (ops#1919); without one the gate falls back to
+#                         # the Actions token and the thread stays open
 # A caller missing a fire token gets a `⛔ Gate` comment naming it and a red
 # job; one missing the read token gets a red job naming it.
 
@@ -62,7 +64,10 @@ jobs:
     # Every PR event from a branch in this repo. On a comment: a routine's
     # edit to a loop comment (the loop's own events), or `/autofix` from the
     # repo owner. The gate's own writes use GITHUB_TOKEN, whose events start
-    # no workflow, so it cannot loop on itself. Who may start a round is
+    # no workflow, except the reply on an inline finding thread and its
+    # resolve, which use the user token (ops#1919): those are review-comment
+    # and GraphQL events, which this workflow does not trigger on, so it
+    # still cannot loop on itself. Who may start a round is
     # policy, and lives here once (ops#941), not in the stubs.
     # A release head never wakes the gate (ops#1372): the Release PR job
     # posts its Evaluator status as it pushes release/next.
