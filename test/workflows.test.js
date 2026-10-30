@@ -112,12 +112,22 @@ describe("_reusable-evaluator-gate.yml — one job running the gate action", () 
     )
   })
 
-  it("no draft toggle, no label, no Slack, no second token", () => {
+  it("no draft toggle, no label, no Slack; the user token reaches only the gate's target-token input", () => {
     const text = read("_reusable-evaluator-gate.yml")
     expect(text).not.toMatch(
       /convertPullRequestToDraft|markPullRequestReadyForReview/,
     )
-    expect(text).not.toMatch(/SLACK_|RELEASE_PR_TOKEN|labels\/autofix/)
+    expect(text).not.toMatch(/SLACK_|labels\/autofix/)
+    // ops#1919: the gate replies on inline finding threads and resolves them
+    // with a user token, since the Actions token may not resolve a thread
+    // (ops#1914). Those writes are review-comment and GraphQL events, which
+    // start no gate run, so the loop still cannot trigger itself. The
+    // token goes nowhere else: no step of its own, no other env.
+    const uses = text.match(/RELEASE_PR_TOKEN/g) || []
+    expect(uses.length).toBeGreaterThan(0)
+    expect(text).toMatch(
+      /target-token: \$\{\{ secrets\.TARGET_TOKEN \|\| secrets\.RELEASE_PR_TOKEN \}\}/,
+    )
     expect(FILES).not.toContain("_reusable-evaluator-autofix.yml")
   })
 
