@@ -26,6 +26,15 @@ inputs:
       A token with contents read on chrisgriffin/ops (OPS_GH_TOKEN, or
       TARGET_TOKEN in ops itself), used only to check the gate script out.
     required: true
+  target-token:
+    description: >-
+      A cgio-agent PAT with pull-request write on the caller (TARGET_TOKEN),
+      never an owner's token. The gate replies on inline finding threads and
+      resolves them with it, which the Actions token may not do (ops#1914,
+      ops#1919). Empty: the reply posts as the Actions token and the thread
+      stays open.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -57,4 +66,5 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         EVALUATOR_FIRE_TOKEN: ${{ inputs.evaluator-fire-token }}
         AUTOFIX_FIRE_TOKEN: ${{ inputs.autofix-fire-token }}
+        TARGET_TOKEN: ${{ inputs.target-token }}
       run: node .pr-loop-gate/pr-loop/gate.mjs
