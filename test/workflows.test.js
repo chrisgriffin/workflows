@@ -73,7 +73,7 @@ describe("every _reusable-*.yml is a workflow_call body", () => {
 describe("_reusable-evaluator-gate.yml — one job running the gate action", () => {
   const gate = load("_reusable-evaluator-gate.yml")
 
-  it("one job, one step: the pr-loop-gate action at develop, with both fire tokens and the token that reads the script", () => {
+  it("one job, one step: the pr-loop-gate action at develop, with both fire tokens, the token that reads the script, and the user token that resolves a thread", () => {
     expect(Object.keys(gate.jobs)).toEqual(["gate"])
     expect(gate.jobs.gate.steps).toHaveLength(1)
     const [step] = gate.jobs.gate.steps
@@ -85,6 +85,8 @@ describe("_reusable-evaluator-gate.yml — one job running the gate action", () 
       "evaluator-fire-token": "${{ secrets.EVALUATOR_FIRE_TOKEN }}",
       "autofix-fire-token": "${{ secrets.AUTOFIX_FIRE_TOKEN }}",
       "ops-token": "${{ secrets.OPS_GH_TOKEN || secrets.TARGET_TOKEN }}",
+      // ops#1919: only a user token may resolve a review thread.
+      "target-token": "${{ secrets.TARGET_TOKEN || secrets.RELEASE_PR_TOKEN }}",
     })
   })
 
@@ -155,14 +157,16 @@ describe("the pr-loop-gate action — the gate script keeps its one home in chri
     })
   })
 
-  it("runs the script from that checkout with the caller's token and both fire tokens in its environment", () => {
+  it("runs the script from that checkout with the caller's token, both fire tokens and the optional user token in its environment", () => {
     const run = steps.find(s => (s.run || "").includes("gate.mjs"))
     expect(run.run.trim()).toBe("node .pr-loop-gate/pr-loop/gate.mjs")
     expect(run.env).toEqual({
       GITHUB_TOKEN: "${{ inputs.github-token }}",
       EVALUATOR_FIRE_TOKEN: "${{ inputs.evaluator-fire-token }}",
       AUTOFIX_FIRE_TOKEN: "${{ inputs.autofix-fire-token }}",
+      TARGET_TOKEN: "${{ inputs.target-token }}",
     })
+    expect(a.inputs["target-token"].required).toBe(false)
   })
 })
 

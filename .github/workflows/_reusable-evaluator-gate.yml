@@ -22,6 +22,10 @@ name: (reusable) Evaluator Gate
 #   OPS_GH_TOKEN          # a token that can read chrisgriffin/ops (contents:
 #                         # read), where the gate script lives; ops itself
 #                         # has TARGET_TOKEN instead
+#   RELEASE_PR_TOKEN      # a user token with pull-request write on the
+#                         # caller (TARGET_TOKEN in ops): the gate replies on
+#                         # inline finding threads and resolves them with it
+#                         # (ops#1919); without one the thread stays open
 # A caller missing a fire token gets a `⛔ Gate` comment naming it and a red
 # job; one missing the read token gets a red job naming it.
 
@@ -39,7 +43,10 @@ on:
         description: A token with contents read on chrisgriffin/ops, where the gate script lives.
         required: false
       TARGET_TOKEN:
-        description: ops's own stand-in for OPS_GH_TOKEN; a target passes nothing here.
+        description: ops's own stand-in for OPS_GH_TOKEN and for RELEASE_PR_TOKEN; a target passes nothing here.
+        required: false
+      RELEASE_PR_TOKEN:
+        description: A user token with pull-request write on the caller; the gate resolves inline finding threads with it (ops#1919).
         required: false
 
 # Commenting on a pull request needs pull-requests: write; with read the
@@ -86,3 +93,4 @@ jobs:
           evaluator-fire-token: ${{ secrets.EVALUATOR_FIRE_TOKEN }}
           autofix-fire-token: ${{ secrets.AUTOFIX_FIRE_TOKEN }}
           ops-token: ${{ secrets.OPS_GH_TOKEN || secrets.TARGET_TOKEN }}
+          target-token: ${{ secrets.TARGET_TOKEN || secrets.RELEASE_PR_TOKEN }}

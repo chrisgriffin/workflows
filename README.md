@@ -76,7 +76,9 @@ from a fork is skipped, never failed.
 
 - Inputs: none.
 - Secrets: `EVALUATOR_FIRE_TOKEN`, `AUTOFIX_FIRE_TOKEN`, `OPS_GH_TOKEN` (reads
-  the gate script out of chrisgriffin/ops; `TARGET_TOKEN` in ops itself).
+  the gate script out of chrisgriffin/ops; `TARGET_TOKEN` in ops itself),
+  and `RELEASE_PR_TOKEN` (`TARGET_TOKEN` in ops): the user token the gate
+  replies on inline finding threads and resolves them with (ops#1919).
 - The stub grants `contents: read`, `issues: write`, `pull-requests: write`,
   `statuses: write`.
 
