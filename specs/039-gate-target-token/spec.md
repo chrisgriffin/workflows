@@ -16,7 +16,7 @@ The gate (`chrisgriffin/ops` `pr-loop/gate.mjs`, run by `.github/actions/pr-loop
 
 - [x] `pr-loop-gate/action.yml` takes an optional `target-token` input and exports it to the gate step as `TARGET_TOKEN`.
 - [x] `_reusable-evaluator-gate.yml` passes `secrets.TARGET_TOKEN` to that input, and the secret's description says what it is for.
-- [x] **Runnable:** `grep -c 'TARGET_TOKEN: \${{ inputs.target-token }}' .github/actions/pr-loop-gate/action.yml` prints `1` (prints `0` on `develop`), and `npm test` exits 0.
+- [x] **Runnable:** `grep -cF 'TARGET_TOKEN: ${{ inputs.target-token }}' .github/actions/pr-loop-gate/action.yml` prints `1` (prints `0` on `develop`), and `npm test` exits 0.
 
 ## Needs from Chris
 
