@@ -77,8 +77,11 @@ from a fork is skipped, never failed.
 - Inputs: none.
 - Secrets: `EVALUATOR_FIRE_TOKEN`, `AUTOFIX_FIRE_TOKEN`, `OPS_GH_TOKEN` (reads
   the gate script out of chrisgriffin/ops; `TARGET_TOKEN` in ops itself),
-  and `RELEASE_PR_TOKEN` (`TARGET_TOKEN` in ops): the user token the gate
-  replies on inline finding threads and resolves them with (ops#1919).
+  and `TARGET_TOKEN`: the user token the gate replies on inline finding
+  threads and resolves them with (ops#1919). A target passes its
+  `RELEASE_PR_TOKEN` under that key, as below. `TARGET_TOKEN` is also the
+  fallback for `OPS_GH_TOKEN`, so keep passing `OPS_GH_TOKEN`: without it the
+  job fails at the ops checkout without naming the missing secret.
 - The stub grants `contents: read`, `issues: write`, `pull-requests: write`,
   `statuses: write`.
 
@@ -90,7 +93,7 @@ jobs:
       EVALUATOR_FIRE_TOKEN: ${{ secrets.EVALUATOR_FIRE_TOKEN }}
       AUTOFIX_FIRE_TOKEN: ${{ secrets.AUTOFIX_FIRE_TOKEN }}
       OPS_GH_TOKEN: ${{ secrets.OPS_GH_TOKEN }}
-      RELEASE_PR_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
+      TARGET_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
 ```
 
 ## `_reusable-claude-mention.yml` — the `@claude` responder

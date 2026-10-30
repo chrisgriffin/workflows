@@ -13,6 +13,6 @@
 
 ## Surfaces touched
 
-- `.github/actions/pr-loop-gate/action.yml`, `.github/workflows/_reusable-evaluator-gate.yml`: every repo's stub calls them at `@v1`/`@develop`; a stub that passes secrets by name (not `secrets: inherit`) must add `RELEASE_PR_TOKEN` to reach the resolve, which is per-target work filed from ops.
+- `.github/actions/pr-loop-gate/action.yml`, `.github/workflows/_reusable-evaluator-gate.yml`: every repo's stub calls them at `@v1`/`@develop`; a stub that passes secrets by name (not `secrets: inherit`) must add `TARGET_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}` to reach the resolve — under the `TARGET_TOKEN` key, the name every tag declares, so it works at `v1` today and after it moves — which is per-target work filed from ops (config#8, token-atlas#52). Corrected after the Evaluator's round-1 verdict on #40: this line said to add `RELEASE_PR_TOKEN` by its own name, which `v1` does not declare, so such a stub fails at startup.
 - `README.md` § evaluator gate secrets, updated here.
 - The gate's use of `TARGET_TOKEN` is ops#1919 (its own PR).
