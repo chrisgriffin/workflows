@@ -84,9 +84,12 @@ describe("_reusable-evaluator-gate.yml — one job running the gate action", () 
       "github-token": "${{ github.token }}",
       "evaluator-fire-token": "${{ secrets.EVALUATOR_FIRE_TOKEN }}",
       "autofix-fire-token": "${{ secrets.AUTOFIX_FIRE_TOKEN }}",
-      "ops-token": "${{ secrets.OPS_GH_TOKEN || secrets.TARGET_TOKEN }}",
+      // Only ops reads the script with TARGET_TOKEN: a target missing
+      // OPS_GH_TOKEN gets the red job that names it.
+      "ops-token":
+        "${{ secrets.OPS_GH_TOKEN || (github.repository == 'chrisgriffin/ops' && secrets.TARGET_TOKEN || '') }}",
       // ops#1919: only a user token may resolve a review thread.
-      "target-token": "${{ secrets.TARGET_TOKEN || secrets.RELEASE_PR_TOKEN }}",
+      "target-token": "${{ secrets.TARGET_TOKEN }}",
     })
   })
 
@@ -117,23 +120,20 @@ describe("_reusable-evaluator-gate.yml — one job running the gate action", () 
     expect(text).not.toMatch(
       /convertPullRequestToDraft|markPullRequestReadyForReview/,
     )
-    expect(text).not.toMatch(/SLACK_|labels\/autofix/)
+    // The owner's RELEASE_PR_TOKEN never reaches the gate (workflows#21).
+    expect(text).not.toMatch(/SLACK_|RELEASE_PR_TOKEN|labels\/autofix/)
     // ops#1919: the gate replies on inline finding threads and resolves them
     // with a user token, since the Actions token may not resolve a thread
     // (ops#1914). Those writes are review-comment and GraphQL events, which
     // start no gate run, so the loop still cannot trigger itself. The
     // token goes nowhere else: no step of its own, no other env.
-    const releaseUses = text.match(/secrets\.RELEASE_PR_TOKEN\b/g) || []
-    expect(releaseUses).toHaveLength(1)
-    expect(text).toMatch(
-      /target-token: \$\{\{ secrets\.TARGET_TOKEN \|\| secrets\.RELEASE_PR_TOKEN \}\}/,
-    )
+    expect(text).toMatch(/target-token: \$\{\{ secrets\.TARGET_TOKEN \}\}/)
     // ops's TARGET_TOKEN stands in for both: once in ops-token, once in
     // target-token, and nowhere else.
     const targetUses = text.match(/secrets\.TARGET_TOKEN\b/g) || []
     expect(targetUses).toHaveLength(2)
-    expect(text).toMatch(
-      /ops-token: \$\{\{ secrets\.OPS_GH_TOKEN \|\| secrets\.TARGET_TOKEN \}\}/,
+    expect(text).toContain(
+      "ops-token: ${{ secrets.OPS_GH_TOKEN || (github.repository == 'chrisgriffin/ops' && secrets.TARGET_TOKEN || '') }}",
     )
     expect(FILES).not.toContain("_reusable-evaluator-autofix.yml")
   })

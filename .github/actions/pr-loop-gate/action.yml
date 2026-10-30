@@ -28,11 +28,11 @@ inputs:
     required: true
   target-token:
     description: >-
-      A user token with pull-request write on the caller (TARGET_TOKEN: ops's
-      own, or a target's RELEASE_PR_TOKEN passed under that key). The gate replies on inline finding
-      threads and resolves them with it, which the Actions token may not
-      do (ops#1914, ops#1919). Empty: the reply posts as the Actions token
-      and the thread stays open.
+      A cgio-agent PAT with pull-request write on the caller (TARGET_TOKEN),
+      never an owner's token. The gate replies on inline finding threads and
+      resolves them with it, which the Actions token may not do (ops#1914,
+      ops#1919). Empty: the reply posts as the Actions token and the thread
+      stays open.
     required: false
     default: ""
 

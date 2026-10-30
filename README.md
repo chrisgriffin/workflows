@@ -77,11 +77,15 @@ from a fork is skipped, never failed.
 - Inputs: none.
 - Secrets: `EVALUATOR_FIRE_TOKEN`, `AUTOFIX_FIRE_TOKEN`, `OPS_GH_TOKEN` (reads
   the gate script out of chrisgriffin/ops; `TARGET_TOKEN` in ops itself),
-  and `TARGET_TOKEN`: the user token the gate replies on inline finding
-  threads and resolves them with (ops#1919). A target passes its
-  `RELEASE_PR_TOKEN` under that key, as below. `TARGET_TOKEN` is also the
-  fallback for `OPS_GH_TOKEN`, so keep passing `OPS_GH_TOKEN`: without it the
-  job fails at the ops checkout without naming the missing secret.
+  and, optionally, `TARGET_TOKEN`: a `cgio-agent` PAT the gate replies on
+  inline finding threads and resolves them with (ops#1919). Without it the
+  thread stays open. Never pass an owner's token there: the gate would not
+  know its reply as its own and would post it again on every run, and each
+  reply would wake the `@claude` responder. The stub below passes the
+  repo's `RELEASE_PR_TOKEN` under that key, which is right only where that
+  secret holds the `cgio-agent` token; here and in token-atlas it holds the
+  owner's until [#21](https://github.com/chrisgriffin/workflows/issues/21)
+  resets it, so leave the line out there until then.
 - The stub grants `contents: read`, `issues: write`, `pull-requests: write`,
   `statuses: write`.
 

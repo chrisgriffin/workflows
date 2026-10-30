@@ -23,19 +23,16 @@ name: (reusable) Evaluator Gate
 #                         # read), where the gate script lives; ops itself
 #                         # has TARGET_TOKEN instead
 # Optional:
-#   TARGET_TOKEN          # a user token with pull-request write on the
+#   TARGET_TOKEN          # a cgio-agent PAT with pull-request write on the
 #                         # caller: the gate replies on inline finding
 #                         # threads and resolves them with it (ops#1919);
 #                         # without one the gate falls back to the Actions
-#                         # token and the thread stays open. ops passes its
-#                         # own TARGET_TOKEN; a target passes its
-#                         # RELEASE_PR_TOKEN under this key (README.md's
-#                         # example stub), the name every tag declares
-#                         # (config#8, token-atlas#52). A TARGET_TOKEN is
-#                         # also the ops-token fallback, so a target still
-#                         # passes OPS_GH_TOKEN: without it the read-token
-#                         # check passes and the job fails at the ops
-#                         # checkout instead, without naming the secret.
+#                         # token and the thread stays open. Never an
+#                         # owner's token: the gate would not know the reply
+#                         # as its own and post it again on every run, and
+#                         # each reply would wake the @claude responder.
+#                         # In ops it also reads the gate script; a target
+#                         # reads it with OPS_GH_TOKEN alone.
 # A caller missing a fire token gets a `⛔ Gate` comment naming it and a red
 # job; one missing the read token gets a red job naming it.
 
@@ -53,10 +50,7 @@ on:
         description: A token with contents read on chrisgriffin/ops, where the gate script lives.
         required: false
       TARGET_TOKEN:
-        description: The user token the gate resolves inline finding threads with, and the fallback for OPS_GH_TOKEN. ops passes its own; a target passes its RELEASE_PR_TOKEN under this key, the name every tag declares (config#8, token-atlas#52), and still passes OPS_GH_TOKEN.
-        required: false
-      RELEASE_PR_TOKEN:
-        description: The same user token, as a caller using secrets inherit carries it; a caller that names its secrets passes it as TARGET_TOKEN instead (ops#1919).
+        description: A cgio-agent PAT the gate replies on and resolves inline finding threads with (ops#1919), never an owner's token; in ops itself, also the token that reads the gate script.
         required: false
 
 # Commenting on a pull request needs pull-requests: write; with read the
@@ -105,5 +99,5 @@ jobs:
           github-token: ${{ github.token }}
           evaluator-fire-token: ${{ secrets.EVALUATOR_FIRE_TOKEN }}
           autofix-fire-token: ${{ secrets.AUTOFIX_FIRE_TOKEN }}
-          ops-token: ${{ secrets.OPS_GH_TOKEN || secrets.TARGET_TOKEN }}
-          target-token: ${{ secrets.TARGET_TOKEN || secrets.RELEASE_PR_TOKEN }}
+          ops-token: ${{ secrets.OPS_GH_TOKEN || (github.repository == 'chrisgriffin/ops' && secrets.TARGET_TOKEN || '') }}
+          target-token: ${{ secrets.TARGET_TOKEN }}
