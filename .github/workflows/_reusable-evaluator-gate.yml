@@ -45,7 +45,7 @@ on:
         description: A token with contents read on chrisgriffin/ops, where the gate script lives.
         required: false
       TARGET_TOKEN:
-        description: ops's own stand-in for OPS_GH_TOKEN and for RELEASE_PR_TOKEN; a target passes nothing here.
+        description: ops's own stand-in for OPS_GH_TOKEN and for RELEASE_PR_TOKEN. A target that names its secrets passes RELEASE_PR_TOKEN here too, since a caller may only pass a secret the tag it uses declares (config#8, token-atlas#52).
         required: false
       RELEASE_PR_TOKEN:
         description: A user token with pull-request write on the caller; the gate resolves inline finding threads with it (ops#1919).
