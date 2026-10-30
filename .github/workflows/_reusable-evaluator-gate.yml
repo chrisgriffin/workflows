@@ -22,6 +22,17 @@ name: (reusable) Evaluator Gate
 #   OPS_GH_TOKEN          # a token that can read chrisgriffin/ops (contents:
 #                         # read), where the gate script lives; ops itself
 #                         # has TARGET_TOKEN instead
+# Optional:
+#   TARGET_TOKEN          # a cgio-agent PAT with pull-request write on the
+#                         # caller: the gate replies on inline finding
+#                         # threads and resolves them with it (ops#1919);
+#                         # without one the gate falls back to the Actions
+#                         # token and the thread stays open. Never an
+#                         # owner's token: the gate would not know the reply
+#                         # as its own and post it again on every run, and
+#                         # each reply would wake the @claude responder.
+#                         # In ops it also reads the gate script; a target
+#                         # reads it with OPS_GH_TOKEN alone.
 # A caller missing a fire token gets a `⛔ Gate` comment naming it and a red
 # job; one missing the read token gets a red job naming it.
 
@@ -39,7 +50,7 @@ on:
         description: A token with contents read on chrisgriffin/ops, where the gate script lives.
         required: false
       TARGET_TOKEN:
-        description: ops's own stand-in for OPS_GH_TOKEN; a target passes nothing here.
+        description: A cgio-agent PAT the gate replies on and resolves inline finding threads with (ops#1919), never an owner's token; in ops itself, also the token that reads the gate script.
         required: false
 
 # Commenting on a pull request needs pull-requests: write; with read the
@@ -55,7 +66,10 @@ jobs:
     # Every PR event from a branch in this repo. On a comment: a routine's
     # edit to a loop comment (the loop's own events), or `/autofix` from the
     # repo owner. The gate's own writes use GITHUB_TOKEN, whose events start
-    # no workflow, so it cannot loop on itself. Who may start a round is
+    # no workflow, except the reply on an inline finding thread and its
+    # resolve, which use the user token (ops#1919): those are review-comment
+    # and GraphQL events, which this workflow does not trigger on, so it
+    # still cannot loop on itself. Who may start a round is
     # policy, and lives here once (ops#941), not in the stubs.
     # A release head never wakes the gate (ops#1372): the Release PR job
     # posts its Evaluator status as it pushes release/next.
@@ -85,4 +99,5 @@ jobs:
           github-token: ${{ github.token }}
           evaluator-fire-token: ${{ secrets.EVALUATOR_FIRE_TOKEN }}
           autofix-fire-token: ${{ secrets.AUTOFIX_FIRE_TOKEN }}
-          ops-token: ${{ secrets.OPS_GH_TOKEN || secrets.TARGET_TOKEN }}
+          ops-token: ${{ secrets.OPS_GH_TOKEN || (github.repository == 'chrisgriffin/ops' && secrets.TARGET_TOKEN || '') }}
+          target-token: ${{ secrets.TARGET_TOKEN }}
