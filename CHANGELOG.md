@@ -4,6 +4,23 @@ Every release of the fleet's shared workflows. Each entry is generated from
 the conventional-commit history by the release PR; a caller pinned to the
 floating `v1` tag receives every entry under that major on merge.
 
+## [1.6.0](https://github.com/chrisgriffin/workflows/compare/v1.5.0...v1.6.0) (2026-10-29)
+
+### Features
+
+- **evaluator-gate:** hand the gate a user token so it can resolve a review thread ([4eb6f6d](https://github.com/chrisgriffin/workflows/commit/4eb6f6dbb5285a8b51eb656116de136ef34dee47)), closes [#39](https://github.com/chrisgriffin/workflows/issues/39)
+
+### Bug Fixes
+
+- **evaluator-gate:** never hand the gate RELEASE_PR_TOKEN, and read the script with TARGET_TOKEN only in ops ([fc0656c](https://github.com/chrisgriffin/workflows/commit/fc0656cc8019e81848b086430237c1520459b5f9))
+- **evaluator-gate:** say which writes use the user token and pin both secrets exactly ([51edd5a](https://github.com/chrisgriffin/workflows/commit/51edd5a0e0a053a88bdbb622555f60b8acc05e89))
+
+### Documentation
+
+- **evaluator-gate:** one path for a by-name target's user token, under the TARGET_TOKEN key ([67c7d0a](https://github.com/chrisgriffin/workflows/commit/67c7d0aba2c19fd1775b6eb0fe351389a523a2ab))
+- **evaluator-gate:** TARGET_TOKEN is also where a named-secrets target passes its user token ([2814d4b](https://github.com/chrisgriffin/workflows/commit/2814d4ba64498725dc87b5af7447098b6ede024c))
+- **spec:** fixed-string grep for the runnable line ([3b24e4c](https://github.com/chrisgriffin/workflows/commit/3b24e4c437e7d06bf89c5686c7d0b1c3169ec5c8))
+
 ## [1.5.0](https://github.com/chrisgriffin/workflows/compare/v1.4.0...v1.5.0) (2026-10-26)
 
 ### Features
