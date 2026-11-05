@@ -186,7 +186,10 @@ VS Code extension to the Marketplace and Open VSX.
   fails, on either of two errors: `MISSING`, the registry answers and does not
   serve the version; `UNCHECKED`, it could not be reached or read, so the
   version is neither verified nor known missing. Re-running the failed job
-  checks again. A skipped registry is not asked.
+  checks again. A skipped registry is not asked. The job's timeout fits that
+  bound for one extension (packages of one extension, such as its
+  platform-specific `.vsix` files, are read once); a caller publishing more
+  than one extension needs the timeout raised first.
 - `VSCE_PAT` is a global Azure DevOps PAT (organization "All accessible
   organizations"), which Microsoft retires on 2026-12-01. After that the PAT
   stops working; remove the secret, and the caller uploads the Release's

@@ -13,7 +13,7 @@
 2. `read_back` makes one read and prints `verified`, `missing` or `unchecked`.
 3. A loop of `READ_BACK_TRIES` (20) tries, `READ_BACK_WAIT` (30) seconds apart, drops what verifies and keeps the last answer for the rest.
 4. Each `missing` or `unchecked` left gets its own `::error::`, then the existing `Publish failed:` error, then `exit 1`.
-5. `timeout-minutes` goes from 10 to 25: 19 waits of 30 seconds, 20 tries against two registries at a 15-second `--max-time`, and five minutes for the publishes.
+5. `timeout-minutes` goes from 10 to 25: 19 waits of 30 seconds, 20 tries against two registries at a 15-second `--max-time`, and five minutes for the publishes. That holds for one extension identity: the checks are deduped, so platform-specific packages of one extension cost one read per registry, and a caller publishing a second extension raises the timeout first.
 
 Tries, not a wall clock, so a test can run the whole bound with `sleep` stubbed.
 

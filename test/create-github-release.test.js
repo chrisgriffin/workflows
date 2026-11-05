@@ -256,6 +256,7 @@ describe("the marketplace job", () => {
     ovsxReads = [OVSX_FOUND],
     vsceReads = [VSCE_FOUND],
     unzipExit = 0,
+    vsixes = ["ext-0.1.0.vsix"],
     tries,
   }) {
     const bin = mkdtempSync(join(os.tmpdir(), "marketplace-bin-"))
@@ -263,7 +264,7 @@ describe("the marketplace job", () => {
     writeFileSync(log, "")
     writeFileSync(
       join(bin, "gh"),
-      `#!/bin/sh\necho "gh $*" >> "${log}"\nwhile [ $# -gt 0 ]; do [ "$1" = --dir ] && : > "$2/ext-0.1.0.vsix"; shift; done\n`,
+      `#!/bin/sh\necho "gh $*" >> "${log}"\nwhile [ $# -gt 0 ]; do [ "$1" = --dir ] && for f in ${vsixes.join(" ")}; do : > "$2/$f"; done; shift; done\n`,
     )
     writeFileSync(
       join(bin, "npx"),
@@ -275,7 +276,8 @@ describe("the marketplace job", () => {
       `#!/bin/sh\necho "unzip $*" >> "${log}"\n` +
         (unzipExit
           ? `exit ${unzipExit}\n`
-          : `echo '{"publisher":"pub","name":"ext","version":"0.1.0"}'\n`),
+          : `case "$*" in *other-*) n=other;; *) n=ext;; esac\n` +
+            `echo '{"publisher":"pub","name":"'$n'","version":"0.1.0"}'\n`),
     )
     writeFileSync(
       join(bin, "sleep"),
@@ -725,6 +727,63 @@ process.stdout.write(String(read.code))
         expect(line).not.toMatch(/v-pat|o-pat/)
       }
       expect(publish.run).not.toMatch(/curl[^\n]*(VSCE_PAT|OVSX_PAT)/)
+    })
+
+    // A glob can match one extension's platform-specific packages, which all
+    // carry one publisher/name/version: the bound and the timeout are sized
+    // for one read of it per registry per try, and one error each.
+    describe("packages of one extension identity", () => {
+      const PLATFORMS = ["ext-linux-x64-0.1.0.vsix", "ext-win32-x64-0.1.0.vsix"]
+
+      it("reads both packages' manifests, and the identity once per registry", () => {
+        const r = runStep({ ...BOTH, vsixes: PLATFORMS })
+        expect(r.status).toBe(0)
+        expect(count(r.calls, /^unzip /gm)).toBe(2)
+        expect(count(r.calls, OVSX_READ)).toBe(1)
+        expect(count(r.calls, VSCE_READ)).toBe(1)
+        expect(count(r.out, /^Verified: Open-VSX pub\/ext 0\.1\.0$/gm)).toBe(1)
+        expect(
+          count(r.out, /^Verified: VS-Code-Marketplace pub\/ext 0\.1\.0$/gm),
+        ).toBe(1)
+      })
+
+      test.each([
+        ["MISSING", "Open-VSX", { ovsxReads: [OVSX_ABSENT] }, OVSX_READ],
+        [
+          "MISSING",
+          "VS-Code-Marketplace",
+          { vsceReads: [VSCE_ABSENT] },
+          VSCE_READ,
+        ],
+        ["UNCHECKED", "Open-VSX", { ovsxReads: [DOWN] }, OVSX_READ],
+        ["UNCHECKED", "VS-Code-Marketplace", { vsceReads: [BUSY] }, VSCE_READ],
+      ])(
+        "reads it once a try and reports %s on %s once",
+        (word, registry, reads, read) => {
+          const r = runStep({ ...BOTH, ...reads, vsixes: PLATFORMS, tries: 2 })
+          expect(r.status).not.toBe(0)
+          expect(count(r.calls, read)).toBe(2)
+          expect(
+            count(r.out, new RegExp(`^::error::${word}: ${registry} `, "gm")),
+          ).toBe(1)
+          expect(
+            count(r.out, new RegExp(`^Try 2 of 2: ${registry} `, "gm")),
+          ).toBe(1)
+        },
+      )
+
+      it("still reads each of two different extensions", () => {
+        const r = runStep({
+          ...BOTH,
+          vsixes: [...PLATFORMS, "other-0.1.0.vsix"],
+        })
+        expect(r.status).toBe(0)
+        expect(count(r.calls, /^unzip /gm)).toBe(3)
+        expect(count(r.calls, OVSX_READ)).toBe(2)
+        expect(count(r.calls, VSCE_READ)).toBe(2)
+        expect(r.out).toMatch(/^Verified: Open-VSX pub\/ext 0\.1\.0$/m)
+        expect(r.out).toMatch(/^Verified: Open-VSX pub\/other 0\.1\.0$/m)
+      })
     })
 
     // A job the timeout kills mid-poll reports neither MISSING nor UNCHECKED.

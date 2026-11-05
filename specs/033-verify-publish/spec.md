@@ -22,7 +22,7 @@ The `marketplace` job of `_reusable-create-github-release.yml` treats `vsce publ
 - FR-4: The Marketplace is read through its public gallery query with flags 33 (`IncludeVersions`, `ExcludeNonValidated`): a 200 listing that version is verified, a 200 without it is missing, anything else is unchecked.
 - FR-5: The bound is named: 20 tries, 30 seconds apart, about ten minutes, shared across the checks. The last try's answer decides between missing and unchecked. A registry that verifies stops being asked.
 - FR-6: `MISSING` and `UNCHECKED` both red the job, each in its own `::error::` naming the registry, the namespace and the version, and neither stops the other registry being checked.
-- FR-7: The job's `timeout-minutes` holds the whole bound with every try hanging to curl's `--max-time`, on top of the publishes.
+- FR-7: The job's `timeout-minutes` holds the whole bound for one extension identity (publisher, name, version) with every try hanging to curl's `--max-time`, on top of the publishes. Packages sharing an identity, such as one extension's platform-specific `.vsix` files, are read once per registry and reported once. Corrected in review: FR-7 first stated the bound unconditionally, but `marketplace_packages` is a glob, and each further identity it matches adds 2 × 20 × 15 s to the worst case, so a caller publishing more than one extension raises the timeout first. Only `token-atlas` passes the input, with one extension.
 - FR-8: No token reaches a read: both APIs are public. No new input, secret or `permissions:` key.
 
 ## Success criteria

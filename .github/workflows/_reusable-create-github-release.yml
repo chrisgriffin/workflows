@@ -338,8 +338,13 @@ jobs:
   # MISSING. It could not be reached, or its answer could not be read: UNCHECKED,
   # neither verified nor known missing. Both red the job, the same as a failed
   # publish, and a re-run checks again. A registry this run skipped is not asked.
-  # The timeout holds that bound with every try hanging to curl's --max-time, on
-  # top of the publishes: a job killed mid-poll would report neither word.
+  # The timeout holds that bound for one extension identity (publisher/name/
+  # version) with every try hanging to curl's --max-time, on top of the
+  # publishes: a job killed mid-poll would report neither word. Packages of one
+  # identity, such as one extension's platform-specific .vsix files, are read
+  # once. Each further identity a caller's glob matches adds 2 x 20 x 15s to the
+  # worst case, so a caller publishing more than one extension needs the timeout
+  # raised first.
   marketplace:
     needs: release
     if: inputs.marketplace_packages != ''
@@ -446,7 +451,11 @@ jobs:
                 console.log([m.publisher, m.name, m.version].join("/"))
               ')
               for REGISTRY in $PUBLISHED; do
-                CHECKS="$CHECKS $REGISTRY/$ID"
+                # One read per identity: platform-specific packages share one.
+                case " $CHECKS " in
+                  *" $REGISTRY/$ID "*) ;;
+                  *) CHECKS="$CHECKS $REGISTRY/$ID" ;;
+                esac
               done
             done
           fi
