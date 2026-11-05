@@ -209,7 +209,10 @@ VS Code extension to the Marketplace and Open VSX.
   `create-github-release.yml`). Then grant `id-token: write` beside
   `contents: write` in the stub and stop passing `OVSX_PAT`. A token, when
   passed, still wins. Open VSX trusts any ref that runs the registered
-  stub.
+  stub, and any step in that run: the grant reaches every step of the
+  release run, the caller's `build_command` and whatever it installs
+  included, not only the Open VSX publish step, so any of them can request
+  the ID token Open VSX accepts.
 
 ```yaml
 jobs:

@@ -139,7 +139,11 @@ jobs:
       # HEAD, and `gh release create` tags server-side — nothing walks
       # history (ops#571). No persisted credential: every write below goes
       # through `gh` with GITHUB_TOKEN in its environment, and the caller's
-      # build_command runs in a tree that holds no token.
+      # build_command runs in a tree that holds no token. Its step's
+      # environment is not token-free: it carries NODE_AUTH_TOKEN (below)
+      # and, when the caller grants `id-token: write`, the runner's ID-token
+      # request variables, so build_command and whatever it installs can
+      # request the ID token Open VSX accepts (#31, README).
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
@@ -309,7 +313,11 @@ jobs:
   #
   # The two registries are independent: each publishes or says why not, one
   # failing never skips the other, and the step fails at the end if either
-  # did. Each tool sees only its own token.
+  # did. Each tool is handed only its own stored token (`env -u` drops the
+  # other's PAT). Neither is kept from the run's ID token: when the caller
+  # grants `id-token: write`, the runner's ID-token request variables reach
+  # this whole step, vsce included, as they reach every step of the release
+  # job (#31, README).
   #
   # Which repo publishes is the caller's `marketplace_packages` input: this
   # file is public and shared across repos, so it carries no per-repo table.
