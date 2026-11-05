@@ -17,6 +17,6 @@ The README's Open VSX trusted-publishing passage tells a caller to grant `id-tok
 
 ## Success criteria
 
-- [ ] The README's Open VSX trusted-publishing passage says that the caller's `id-token: write` reaches every step in the release run, `build_command` included, not only the Open VSX publish step.
-- [ ] **Runnable:** `grep -A2 "trusts any ref" README.md | grep -c build_command` prints `1` or more (it prints `0` on `develop` today). This is a docs-only ticket, so the repo's verify gate is the other half of the check.
-- [ ] `npm test` and the repo's verify gate pass.
+- [x] The README's Open VSX trusted-publishing passage says that the caller's `id-token: write` reaches every step in the release run, `build_command` included, not only the Open VSX publish step.
+- [x] **Runnable:** `grep -A2 "trusts any ref" README.md | grep -c build_command` prints `1` or more (it prints `0` on `develop` today). This is a docs-only ticket, so the repo's verify gate is the other half of the check.
+- [x] `npm test` and the repo's verify gate pass.
