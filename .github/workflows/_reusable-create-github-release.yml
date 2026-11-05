@@ -328,11 +328,28 @@ jobs:
   # its registration on the ID token's `workflow_ref`, the caller's stub, so
   # the stub's filename is what gets registered. The grant is the caller's
   # alone: this file still has no `permissions:` key (see the release job).
+  #
+  # #33. A publish command exiting 0 says the registry accepted the upload, not
+  # that it serves the version, so each registry this run published to is then
+  # asked for that version on its public read API, with no token. A registry
+  # takes time to show a new version, so "not there yet" is polled for a bounded
+  # time: READ_BACK_TRIES tries, READ_BACK_WAIT seconds apart, about ten minutes.
+  # What the last try said decides. The registry answered without the version:
+  # MISSING. It could not be reached, or its answer could not be read: UNCHECKED,
+  # neither verified nor known missing. Both red the job, the same as a failed
+  # publish, and a re-run checks again. A registry this run skipped is not asked.
+  # The timeout holds that bound for one extension identity (publisher/name/
+  # version) with every try hanging to curl's --max-time, on top of the
+  # publishes: a job killed mid-poll would report neither word. Packages of one
+  # identity, such as one extension's platform-specific .vsix files, are read
+  # once. Each further identity a caller's glob matches adds 2 x 20 x 15s to the
+  # worst case, so a caller publishing more than one extension needs the timeout
+  # raised first.
   marketplace:
     needs: release
     if: inputs.marketplace_packages != ''
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     steps:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
@@ -357,29 +374,126 @@ jobs:
           gh release download "v$VERSION" --repo "$REPO" --dir "$DIR"
           cd "$DIR"
           FAILED=""
+          PUBLISHED=""
+          publish_to() { # a registry, then the command that publishes to it
+            REGISTRY=$1
+            shift
+            if "$@"; then
+              PUBLISHED="$PUBLISHED $REGISTRY"
+            else
+              FAILED="$FAILED $REGISTRY"
+            fi
+          }
           # $PACKAGES is deliberately unquoted below: a glob from the caller's input.
           if [ -z "$VSCE_PAT" ]; then
             echo "::notice::VS Code Marketplace publish skipped: no VSCE_PAT secret on $REPO."
           else
             # shellcheck disable=SC2086
-            env -u OVSX_PAT npx --yes @vscode/vsce@3.9.2 publish --skip-duplicate --packagePath $PACKAGES \
-              || FAILED="$FAILED VS-Code-Marketplace"
+            publish_to VS-Code-Marketplace env -u OVSX_PAT npx --yes @vscode/vsce@3.9.2 publish --skip-duplicate --packagePath $PACKAGES
           fi
           if [ -n "$OVSX_PAT" ]; then
             # shellcheck disable=SC2086
-            env -u VSCE_PAT npx --yes ovsx@1.3.0 publish --skip-duplicate --packagePath $PACKAGES \
-              || FAILED="$FAILED Open-VSX"
+            publish_to Open-VSX env -u VSCE_PAT npx --yes ovsx@1.3.0 publish --skip-duplicate --packagePath $PACKAGES
           elif [ -n "$OIDC" ]; then
             # #22: trusted publishing, the run's OIDC ID token traded for a
             # short-lived publishing token; the flag fails rather than falls
             # back when the exchange does.
             # shellcheck disable=SC2086
-            env -u VSCE_PAT npx --yes ovsx@1.3.0 publish --trusted-publishing --skip-duplicate --packagePath $PACKAGES \
-              || FAILED="$FAILED Open-VSX"
+            publish_to Open-VSX env -u VSCE_PAT npx --yes ovsx@1.3.0 publish --trusted-publishing --skip-duplicate --packagePath $PACKAGES
           else
             echo "::notice::Open VSX publish skipped: no OVSX_PAT secret, and no id-token: write, on $REPO."
           fi
+
+          # #33: read back what was published (the job's comment above).
+          READ_BACK_TRIES=20
+          READ_BACK_WAIT=30
+          BODY=$(mktemp)
+          read_back() { # a registry and publisher/name/version; prints verified, missing or unchecked
+            if [ "$1" = Open-VSX ]; then
+              CODE=$(curl -sS --max-time 15 -o "$BODY" -w '%{http_code}' "https://open-vsx.org/api/$2") || CODE=000
+            else
+              # flags 33 is IncludeVersions and ExcludeNonValidated: a version
+              # still in validation, or that failed it, is not served.
+              EXTENSION=${2%/*}
+              CODE=$(curl -sS --max-time 15 -o "$BODY" -w '%{http_code}' -X POST \
+                -H 'Content-Type: application/json' \
+                -H 'Accept: application/json;api-version=3.0-preview.1' \
+                -d '{"filters":[{"criteria":[{"filterType":7,"value":"'"${EXTENSION/\//.}"'"}]}],"flags":33}' \
+                https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery) || CODE=000
+            fi
+            node -e '
+              const [registry, code, file, version] = process.argv.slice(1)
+              let state = "unchecked"
+              try {
+                const body = JSON.parse(require("fs").readFileSync(file, "utf8"))
+                if (registry === "Open-VSX") {
+                  if (code === "200" && body.version === version) state = "verified"
+                  else if (code === "404" && body.error) state = "missing"
+                } else if (code === "200" && Array.isArray(body.results)) {
+                  const versions = body.results.flatMap(r => r.extensions).flatMap(e => e.versions)
+                  state = versions.some(v => v.version === version) ? "verified" : "missing"
+                }
+              } catch {
+                // Not an answer the registry gives: nothing is known.
+              }
+              console.log(state)
+            ' "$1" "$CODE" "$BODY" "${2##*/}"
+          }
+
+          # Each entry is registry/publisher/name/version, the last three out of
+          # the .vsix itself, which is what the tools published. An unreadable
+          # one stops here, red: $() carries node's failure on unzip's empty output.
+          CHECKS=""
+          if [ -n "$PUBLISHED" ]; then
+            for PKG in $PACKAGES; do
+              ID=$(unzip -qc "$PKG" extension/package.json | node -e '
+                const m = JSON.parse(require("fs").readFileSync(0, "utf8"))
+                console.log([m.publisher, m.name, m.version].join("/"))
+              ')
+              for REGISTRY in $PUBLISHED; do
+                # One read per identity: platform-specific packages share one.
+                case " $CHECKS " in
+                  *" $REGISTRY/$ID "*) ;;
+                  *) CHECKS="$CHECKS $REGISTRY/$ID" ;;
+                esac
+              done
+            done
+          fi
+          UNVERIFIED=""
+          TRY=0
+          while [ -n "$CHECKS" ] && [ "$TRY" -lt "$READ_BACK_TRIES" ]; do
+            [ "$TRY" -eq 0 ] || sleep "$READ_BACK_WAIT"
+            TRY=$((TRY + 1))
+            LEFT=""
+            UNVERIFIED=""
+            for CHECK in $CHECKS; do
+              REGISTRY=${CHECK%%/*}
+              ID=${CHECK#*/}
+              STATE=$(read_back "$REGISTRY" "$ID")
+              if [ "$STATE" = verified ]; then
+                echo "Verified: $REGISTRY ${ID%/*} ${ID##*/}"
+              else
+                echo "Try $TRY of $READ_BACK_TRIES: $REGISTRY ${ID%/*} ${ID##*/}: $STATE"
+                LEFT="$LEFT $CHECK"
+                UNVERIFIED="$UNVERIFIED $STATE=$CHECK"
+              fi
+            done
+            CHECKS=$LEFT
+          done
+          BOUND="after $READ_BACK_TRIES tries, ${READ_BACK_WAIT}s apart. Re-run the failed job to check again."
+          for ENTRY in $UNVERIFIED; do
+            CHECK=${ENTRY#*=}
+            ID=${CHECK#*/}
+            WHAT="${CHECK%%/*} ${ID%/*} ${ID##*/}"
+            if [ "${ENTRY%%=*}" = missing ]; then
+              echo "::error::MISSING: $WHAT: the registry answers and does not serve this version, $BOUND"
+            else
+              echo "::error::UNCHECKED: $WHAT: the registry could not be reached or read, so this version is neither verified nor known missing, $BOUND"
+            fi
+          done
           if [ -n "$FAILED" ]; then
             echo "::error::Publish failed:$FAILED"
+          fi
+          if [ -n "$FAILED" ] || [ -n "$UNVERIFIED" ]; then
             exit 1
           fi

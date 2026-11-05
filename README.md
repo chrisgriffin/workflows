@@ -179,6 +179,17 @@ VS Code extension to the Marketplace and Open VSX.
   failed. A failed publish is retried by re-running the run; the job reads
   the `.vsix` back off the Release, which already exists, and a version
   already on a registry counts as published.
+- After publishing, the job asks each registry it published to for that
+  version on its public read API, and its log names the registry, the
+  namespace and the version. A registry takes time to show a new version, so
+  it asks up to 20 times, 30 seconds apart, about ten minutes. Then the job
+  fails, on either of two errors: `MISSING`, the registry answers and does not
+  serve the version; `UNCHECKED`, it could not be reached or read, so the
+  version is neither verified nor known missing. Re-running the failed job
+  checks again. A skipped registry is not asked. The job's timeout fits that
+  bound for one extension (packages of one extension, such as its
+  platform-specific `.vsix` files, are read once); a caller publishing more
+  than one extension needs the timeout raised first.
 - `VSCE_PAT` is a global Azure DevOps PAT (organization "All accessible
   organizations"), which Microsoft retires on 2026-12-01. After that the PAT
   stops working; remove the secret, and the caller uploads the Release's
@@ -288,7 +299,8 @@ each change.
 (`bash -e`, the step's own `env:` names) against throwaway git repos and
 fixtures: the CI gate's scope, budget and docs checks, the release PR's
 version bump, PR list and changelog splice, the release's changelog cut and
-Marketplace publish, the sync's refused-push fallback, the mention hook's guard.
+Marketplace publish and read-back, the sync's refused-push fallback, the mention
+hook's guard.
 `test/workflows.test.js` pins what every file here follows: `workflow_call`
 only, secrets declared by name, a timeout on every job, a full commit SHA on
 every GitHub-owned action, nothing under `chrisgriffin/ops/.github`.
