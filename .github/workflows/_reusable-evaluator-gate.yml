@@ -80,8 +80,13 @@ jobs:
     # ruleset that requires this check. Skipped, the check-run completes and
     # the `Evaluator` commit status is simply never posted, so a fork PR
     # waits for a maintainer rather than a machine.
+    #
+    # A draft's own events are skipped too (workflows#48): a draft waits under
+    # the fleet's in-flight cap and spends nothing, and `ready_for_review`,
+    # which every stub subscribes to, starts its first grade.
     if: >-
       (github.event_name == 'pull_request' &&
+      github.event.pull_request.draft == false &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       !startsWith(github.event.pull_request.head.ref, 'release/')) ||
       (github.event.issue.pull_request &&

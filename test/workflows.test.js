@@ -73,6 +73,20 @@ describe("every _reusable-*.yml is a workflow_call body", () => {
 describe("_reusable-evaluator-gate.yml — one job running the gate action", () => {
   const gate = load("_reusable-evaluator-gate.yml")
 
+  it("skips a draft's pull_request events, and only those (workflows#48)", () => {
+    const cond = gate.jobs.gate.if
+    const prArm = cond.split("||")[0]
+    expect(prArm).toContain("github.event_name == 'pull_request'")
+    expect(prArm).toContain("github.event.pull_request.draft == false")
+    expect(cond.match(/draft == false/g)).toHaveLength(1)
+  })
+
+  it("this repo's build / ci skips a draft and still runs on push (workflows#48)", () => {
+    expect(load("build-check.yml").jobs.ci.if).toBe(
+      "github.event_name == 'push' || github.event.pull_request.draft == false",
+    )
+  })
+
   it("one job, one step: the pr-loop-gate action at develop, with both fire tokens, the token that reads the script, and the user token that resolves a thread", () => {
     expect(Object.keys(gate.jobs)).toEqual(["gate"])
     expect(gate.jobs.gate.steps).toHaveLength(1)
@@ -99,7 +113,7 @@ describe("_reusable-evaluator-gate.yml — one job running the gate action", () 
     // A release head never wakes the gate (ops#1372): the Release PR job
     // posts that status itself.
     expect(gate.jobs.gate.if).toMatch(
-      /github\.event_name == 'pull_request' &&\s*github\.event\.pull_request\.head\.repo\.full_name == github\.repository &&\s*!startsWith\(github\.event\.pull_request\.head\.ref, 'release\/'\)/,
+      /github\.event_name == 'pull_request' &&\s*github\.event\.pull_request\.draft == false &&\s*github\.event\.pull_request\.head\.repo\.full_name == github\.repository &&\s*!startsWith\(github\.event\.pull_request\.head\.ref, 'release\/'\)/,
     )
   })
 
