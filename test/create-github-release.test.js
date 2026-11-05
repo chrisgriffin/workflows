@@ -5,7 +5,7 @@
  * `hotfix/*` PR lands on main: reads the version, cuts that section out of
  * CHANGELOG.md, creates the Release and tag, then the optional publishes.
  * The shell that decides something (the awk that cuts the notes, the
- * Marketplace job's no-token skips and publishes) runs here.
+ * Marketplace job's no-token skips, publishes and read-back) runs here.
  */
 const { readFileSync, mkdtempSync, writeFileSync, chmodSync } = require("fs")
 const { execSync, spawnSync } = require("child_process")
@@ -213,6 +213,7 @@ ${h2}
 // registry), or the day a token lands nobody can tell whether publishing
 // started. It is its own job, reading the .vsix off the Release by version,
 // so re-running a failed publish retries it even though the Release exists.
+// #33: what it published it then reads back from the registry.
 // ---------------------------------------------------------------------------
 describe("the marketplace job", () => {
   // `|| { steps: [] }` so each test, not the whole file, fails without it.
@@ -221,16 +222,41 @@ describe("the marketplace job", () => {
     s => s.name === "Publish to the VS Code Marketplace and Open VSX",
   )
 
+  // What each registry's read API answers: the registry's own shape for a
+  // version it serves and for one it does not, read off both live.
+  const OVSX_FOUND = { code: 200, body: JSON.stringify({ version: "0.1.0" }) }
+  const OVSX_ABSENT = {
+    code: 404,
+    body: JSON.stringify({ error: "Extension not found: pub.ext 0.1.0" }),
+  }
+  const gallery = extensions => ({
+    code: 200,
+    body: JSON.stringify({ results: [{ extensions }] }),
+  })
+  const VSCE_FOUND = gallery([{ versions: [{ version: "0.1.0" }] }])
+  const VSCE_ABSENT = gallery([])
+  const VSCE_OLDER = gallery([{ versions: [{ version: "0.0.9" }] }])
+  const DOWN = { down: true }
+  const BUSY = { code: 503, body: "<html>Service Unavailable</html>" }
+
   // The step's script run the way the runner would (`bash -e`, its env),
-  // with `gh` and `npx` stubbed: `gh release download` drops the Release's
-  // .vsix into --dir; npx logs each tool's arguments and the tokens it saw,
-  // and exits with that tool's code.
+  // with `gh`, `npx`, `unzip`, `curl` and `sleep` stubbed: `gh release
+  // download` drops the Release's .vsix into --dir; npx logs each tool's
+  // arguments and the tokens it saw, and exits with that tool's code; unzip
+  // prints the .vsix's manifest; curl answers from `ovsxReads` or `vsceReads`
+  // in turn, the last answer repeating; sleep only logs, so a test of the
+  // polling bound takes no time. `tries` shortens the bound for a test about
+  // something else: a read costs two processes, and one test pins the real one.
   function runStep({
     vsce = "",
     ovsx = "",
     oidc = false,
     vsceExit = 0,
     ovsxExit = 0,
+    ovsxReads = [OVSX_FOUND],
+    vsceReads = [VSCE_FOUND],
+    unzipExit = 0,
+    tries,
   }) {
     const bin = mkdtempSync(join(os.tmpdir(), "marketplace-bin-"))
     const log = join(bin, "calls.log")
@@ -244,9 +270,43 @@ describe("the marketplace job", () => {
       `#!/bin/sh\necho "npx $* vsce_pat=$VSCE_PAT ovsx_pat=$OVSX_PAT" >> "${log}"\n` +
         `case "$2" in @vscode/vsce@*) exit ${vsceExit};; ovsx@*) exit ${ovsxExit};; esac\n`,
     )
-    chmodSync(join(bin, "gh"), 0o755)
-    chmodSync(join(bin, "npx"), 0o755)
-    const res = spawnSync("bash", ["-e", "-c", publish.run], {
+    writeFileSync(
+      join(bin, "unzip"),
+      `#!/bin/sh\necho "unzip $*" >> "${log}"\n` +
+        (unzipExit
+          ? `exit ${unzipExit}\n`
+          : `echo '{"publisher":"pub","name":"ext","version":"0.1.0"}'\n`),
+    )
+    writeFileSync(
+      join(bin, "sleep"),
+      `#!/bin/sh\necho "sleep $*" >> "${log}"\n`,
+    )
+    const reads = join(bin, "reads.json")
+    writeFileSync(reads, JSON.stringify({ ovsxReads, vsceReads }))
+    writeFileSync(
+      join(bin, "curl"),
+      `#!/usr/bin/env node
+const fs = require("fs")
+const args = process.argv.slice(2)
+fs.appendFileSync(${JSON.stringify(log)}, "curl " + args.join(" ") + "\\n")
+const plan = JSON.parse(fs.readFileSync(${JSON.stringify(reads)}, "utf8"))
+const key = args.some(a => a.includes("open-vsx.org")) ? "ovsxReads" : "vsceReads"
+const read = plan[key].length > 1 ? plan[key].shift() : plan[key][0]
+fs.writeFileSync(${JSON.stringify(reads)}, JSON.stringify(plan))
+if (read.down) {
+  process.stdout.write("000")
+  process.exit(7)
+}
+fs.writeFileSync(args[args.indexOf("-o") + 1], read.body)
+process.stdout.write(String(read.code))
+`,
+    )
+    for (const tool of ["gh", "npx", "unzip", "sleep", "curl"])
+      chmodSync(join(bin, tool), 0o755)
+    const script = tries
+      ? publish.run.replace(/READ_BACK_TRIES=\d+/, `READ_BACK_TRIES=${tries}`)
+      : publish.run
+    const res = spawnSync("bash", ["-e", "-c", script], {
       encoding: "utf8",
       env: {
         PATH: `${bin}:${process.env.PATH}`,
@@ -438,5 +498,242 @@ describe("the marketplace job", () => {
     expect(job["continue-on-error"]).toBeUndefined()
     expect(publish["continue-on-error"]).toBeUndefined()
     expect(publish.run).not.toMatch(/\|\|\s*true/)
+  })
+
+  // #33 — a publish command exiting 0 says the registry accepted the upload,
+  // not that it serves the version, so a publish that stored nothing looked
+  // exactly like one that worked. The job asks the registry afterwards.
+  describe("reads the publish back", () => {
+    const BOTH = { vsce: "v-pat", ovsx: "o-pat" }
+    const count = (calls, re) => (calls.match(re) || []).length
+    const OVSX_READ = /^curl .*open-vsx\.org/gm
+    const VSCE_READ = /^curl .*marketplace\.visualstudio\.com/gm
+    const SLEEP = /^sleep 30$/gm
+
+    it("names the registry, the namespace and the version it verified", () => {
+      const r = runStep(BOTH)
+      expect(r.status).toBe(0)
+      expect(r.out).toMatch(/^Verified: VS-Code-Marketplace pub\/ext 0\.1\.0$/m)
+      expect(r.out).toMatch(/^Verified: Open-VSX pub\/ext 0\.1\.0$/m)
+      expect(r.calls).toMatch(
+        /https:\/\/open-vsx\.org\/api\/pub\/ext\/0\.1\.0$/m,
+      )
+      expect(r.calls).toMatch(/"value":"pub\.ext"/)
+      // IncludeVersions | ExcludeNonValidated: a version still in validation,
+      // or that failed it, is not one the Marketplace serves.
+      expect(r.calls).toMatch(/"flags":33/)
+      expect(count(r.calls, SLEEP)).toBe(0)
+    })
+
+    it("reads the extension's identity out of the .vsix the job published", () => {
+      const r = runStep(BOTH)
+      expect(r.calls).toMatch(
+        /^unzip .*ext-0\.1\.0\.vsix extension\/package\.json$/m,
+      )
+    })
+
+    it("reads a trusted publish back too", () => {
+      const r = runStep({ oidc: true, ovsxReads: [OVSX_ABSENT], tries: 1 })
+      expect(r.status).not.toBe(0)
+      expect(r.out).toMatch(/::error::MISSING: Open-VSX pub\/ext 0\.1\.0/)
+    })
+
+    test.each([
+      [
+        "Open VSX",
+        { ovsxReads: [OVSX_ABSENT, OVSX_ABSENT, OVSX_FOUND] },
+        OVSX_READ,
+      ],
+      [
+        "the Marketplace",
+        { vsceReads: [VSCE_ABSENT, VSCE_OLDER, VSCE_FOUND] },
+        VSCE_READ,
+      ],
+      [
+        "an outage on Open VSX",
+        { ovsxReads: [DOWN, BUSY, OVSX_FOUND] },
+        OVSX_READ,
+      ],
+    ])(
+      "polls through a delay on %s: not there yet is not missing",
+      (_, reads, read) => {
+        const r = runStep({ ...BOTH, ...reads })
+        expect(r.status).toBe(0)
+        expect(count(r.calls, read)).toBe(3)
+        expect(count(r.calls, SLEEP)).toBe(2)
+        expect(r.out).not.toMatch(/::error::/)
+      },
+    )
+
+    test.each([
+      ["Open-VSX", { ovsxReads: [OVSX_ABSENT] }, OVSX_READ],
+      ["VS-Code-Marketplace", { vsceReads: [VSCE_ABSENT] }, VSCE_READ],
+      ["VS-Code-Marketplace", { vsceReads: [VSCE_OLDER] }, VSCE_READ],
+    ])(
+      "reds the job as MISSING when %s answers without the version, once the bound is spent",
+      (registry, reads, read) => {
+        const r = runStep({ ...BOTH, ...reads, tries: 2 })
+        expect(r.status).not.toBe(0)
+        expect(r.out).toMatch(
+          new RegExp(`^::error::MISSING: ${registry} pub/ext 0\\.1\\.0: `, "m"),
+        )
+        expect(r.out).not.toMatch(/UNCHECKED/)
+        expect(count(r.calls, read)).toBe(2)
+      },
+    )
+
+    test.each([
+      ["Open-VSX", "does not connect", { ovsxReads: [DOWN] }, OVSX_READ],
+      ["Open-VSX", "answers 503", { ovsxReads: [BUSY] }, OVSX_READ],
+      [
+        "VS-Code-Marketplace",
+        "does not connect",
+        { vsceReads: [DOWN] },
+        VSCE_READ,
+      ],
+      ["VS-Code-Marketplace", "answers 503", { vsceReads: [BUSY] }, VSCE_READ],
+      [
+        "Open-VSX",
+        "answers 200 with something unreadable",
+        { ovsxReads: [{ code: 200, body: "<html>" }] },
+        OVSX_READ,
+      ],
+      [
+        "VS-Code-Marketplace",
+        "answers 200 with no results",
+        { vsceReads: [{ code: 200, body: "{}" }] },
+        VSCE_READ,
+      ],
+      [
+        "Open-VSX",
+        "answers a 404 that is not the registry's own",
+        { ovsxReads: [{ code: 404, body: "<html>" }] },
+        OVSX_READ,
+      ],
+    ])(
+      "reds the job as UNCHECKED, never MISSING or verified, when %s %s",
+      (registry, _, reads, read) => {
+        const r = runStep({ ...BOTH, ...reads, tries: 2 })
+        expect(r.status).not.toBe(0)
+        expect(r.out).toMatch(
+          new RegExp(
+            `^::error::UNCHECKED: ${registry} pub/ext 0\\.1\\.0: `,
+            "m",
+          ),
+        )
+        expect(r.out).not.toMatch(/MISSING/)
+        expect(r.out).not.toMatch(new RegExp(`Verified: ${registry}`))
+        expect(count(r.calls, read)).toBe(2)
+      },
+    )
+
+    it("spends the named bound before calling anything: 20 tries, 30 seconds apart", () => {
+      const r = runStep({
+        ...BOTH,
+        ovsxReads: [OVSX_ABSENT],
+        vsceReads: [DOWN],
+      })
+      expect(r.status).not.toBe(0)
+      expect(count(r.calls, OVSX_READ)).toBe(20)
+      expect(count(r.calls, VSCE_READ)).toBe(20)
+      expect(count(r.calls, SLEEP)).toBe(19)
+      expect(r.out).toMatch(
+        /::error::MISSING: Open-VSX.*after 20 tries, 30s apart/,
+      )
+      expect(r.out).toMatch(
+        /::error::UNCHECKED: VS-Code-Marketplace.*after 20 tries, 30s apart/,
+      )
+    })
+
+    it("calls it by the last answer: absent, then unreachable, is unchecked", () => {
+      const r = runStep({ ...BOTH, ovsxReads: [OVSX_ABSENT, DOWN], tries: 2 })
+      expect(r.status).not.toBe(0)
+      expect(r.out).toMatch(/::error::UNCHECKED: Open-VSX/)
+      expect(r.out).not.toMatch(/MISSING/)
+    })
+
+    it("reports each registry on its own, and stops asking the one that answered", () => {
+      const r = runStep({
+        ...BOTH,
+        ovsxReads: [DOWN],
+        vsceReads: [VSCE_ABSENT],
+        tries: 1,
+      })
+      expect(r.out).toMatch(/::error::UNCHECKED: Open-VSX/)
+      expect(r.out).toMatch(/::error::MISSING: VS-Code-Marketplace/)
+
+      const one = runStep({ ...BOTH, ovsxReads: [OVSX_ABSENT], tries: 2 })
+      expect(one.out).toMatch(/^Verified: VS-Code-Marketplace/m)
+      expect(one.out).toMatch(/::error::MISSING: Open-VSX/)
+      expect(count(one.calls, VSCE_READ)).toBe(1)
+    })
+
+    test.each([
+      ["the Marketplace", { ovsx: "o-pat" }, VSCE_READ, OVSX_READ],
+      ["Open VSX", { vsce: "v-pat" }, OVSX_READ, VSCE_READ],
+    ])(
+      "never reads back a skipped %s, however its read API would answer",
+      (_, tokens, skipped, published) => {
+        const r = runStep({
+          ...tokens,
+          ...(skipped === VSCE_READ
+            ? { vsceReads: [VSCE_ABSENT] }
+            : { ovsxReads: [OVSX_ABSENT] }),
+        })
+        expect(r.status).toBe(0)
+        expect(count(r.calls, skipped)).toBe(0)
+        expect(count(r.calls, published)).toBe(1)
+        expect(r.out).not.toMatch(/::error::/)
+      },
+    )
+
+    it("touches no registry and no .vsix for a repo publishing to neither", () => {
+      const r = runStep({ ovsxReads: [DOWN], vsceReads: [DOWN] })
+      expect(r.status).toBe(0)
+      expect(r.calls).toBe("")
+      expect(r.out).not.toMatch(/::error::|Verified|MISSING|UNCHECKED/)
+      // And a repo passing no marketplace_packages never starts the job.
+      expect(job.if).toBe("inputs.marketplace_packages != ''")
+    })
+
+    it("does not read back a publish that failed: it is already red for that", () => {
+      const r = runStep({ ...BOTH, vsceExit: 1, vsceReads: [VSCE_ABSENT] })
+      expect(r.status).not.toBe(0)
+      expect(r.out).toMatch(/Publish failed: VS-Code-Marketplace$/m)
+      expect(count(r.calls, VSCE_READ)).toBe(0)
+      expect(r.out).toMatch(/^Verified: Open-VSX/m)
+
+      const both = runStep({ ...BOTH, vsceExit: 1, ovsxExit: 1 })
+      expect(both.out).toMatch(/Publish failed: VS-Code-Marketplace Open-VSX$/m)
+      expect(both.calls).not.toMatch(/^(curl|unzip) /m)
+    })
+
+    // `unzip | node` hides unzip's status, so an unreadable .vsix must not
+    // leave an empty list of things to check and a green job.
+    it("reds the job when it cannot tell what it published", () => {
+      const r = runStep({ ...BOTH, unzipExit: 9 })
+      expect(r.status).not.toBe(0)
+      expect(r.out).not.toMatch(/Verified/)
+      expect(r.calls).not.toMatch(/^curl /m)
+    })
+
+    it("sends neither token to a read API", () => {
+      const r = runStep(BOTH)
+      for (const line of r.calls
+        .split("\n")
+        .filter(l => l.startsWith("curl "))) {
+        expect(line).not.toMatch(/v-pat|o-pat/)
+      }
+      expect(publish.run).not.toMatch(/curl[^\n]*(VSCE_PAT|OVSX_PAT)/)
+    })
+
+    // A job the timeout kills mid-poll reports neither MISSING nor UNCHECKED.
+    it("fits the whole bound inside the job's timeout, publishes included", () => {
+      const tries = Number(publish.run.match(/READ_BACK_TRIES=(\d+)/)[1])
+      const wait = Number(publish.run.match(/READ_BACK_WAIT=(\d+)/)[1])
+      const maxTime = Number(publish.run.match(/--max-time (\d+)/)[1])
+      const worst = (tries - 1) * wait + tries * 2 * maxTime
+      expect(job["timeout-minutes"] * 60).toBeGreaterThan(worst + 5 * 60)
+    })
   })
 })
