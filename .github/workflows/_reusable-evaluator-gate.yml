@@ -81,12 +81,16 @@ jobs:
     # the `Evaluator` commit status is simply never posted, so a fork PR
     # waits for a maintainer rather than a machine.
     #
-    # A draft's own events are skipped too (workflows#48): a draft waits under
-    # the fleet's in-flight cap and spends nothing, and `ready_for_review`,
-    # which every stub subscribes to, starts its first grade.
+    # A draft's own events are skipped too (workflows#48): a parked draft
+    # spends nothing, and `ready_for_review`, which every stub subscribes to,
+    # starts its first grade. The one draft event still let through is
+    # `converted_to_draft` itself: it is what runs the gate's draft branch
+    # (ops pr-loop/state.mjs), which supersedes a `working` Evaluator block
+    # and sets the `Evaluator` status to pending (ops#1579).
     if: >-
       (github.event_name == 'pull_request' &&
-      github.event.pull_request.draft == false &&
+      (github.event.pull_request.draft == false ||
+      github.event.action == 'converted_to_draft') &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       !startsWith(github.event.pull_request.head.ref, 'release/')) ||
       (github.event.issue.pull_request &&

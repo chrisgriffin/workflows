@@ -73,12 +73,19 @@ describe("every _reusable-*.yml is a workflow_call body", () => {
 describe("_reusable-evaluator-gate.yml — one job running the gate action", () => {
   const gate = load("_reusable-evaluator-gate.yml")
 
-  it("skips a draft's pull_request events, and only those (workflows#48)", () => {
+  it("skips a draft's pull_request events but converted_to_draft, and only those (workflows#48)", () => {
     const cond = gate.jobs.gate.if
-    const prArm = cond.split("||")[0]
-    expect(prArm).toContain("github.event_name == 'pull_request'")
-    expect(prArm).toContain("github.event.pull_request.draft == false")
+    // converted_to_draft runs the gate's draft branch, which supersedes a
+    // working Evaluator block and sets the status to pending (ops#1579).
+    const draftClause =
+      /\(github\.event\.pull_request\.draft == false \|\|\s*github\.event\.action == 'converted_to_draft'\)/
+    expect(cond).toMatch(
+      new RegExp(
+        "github\\.event_name == 'pull_request' &&\\s*" + draftClause.source,
+      ),
+    )
     expect(cond.match(/draft == false/g)).toHaveLength(1)
+    expect(cond.match(/converted_to_draft/g)).toHaveLength(1)
   })
 
   it("this repo's build / ci skips a draft and still runs on push (workflows#48)", () => {
@@ -113,7 +120,7 @@ describe("_reusable-evaluator-gate.yml — one job running the gate action", () 
     // A release head never wakes the gate (ops#1372): the Release PR job
     // posts that status itself.
     expect(gate.jobs.gate.if).toMatch(
-      /github\.event_name == 'pull_request' &&\s*github\.event\.pull_request\.draft == false &&\s*github\.event\.pull_request\.head\.repo\.full_name == github\.repository &&\s*!startsWith\(github\.event\.pull_request\.head\.ref, 'release\/'\)/,
+      /github\.event_name == 'pull_request' &&\s*\(github\.event\.pull_request\.draft == false \|\|\s*github\.event\.action == 'converted_to_draft'\) &&\s*github\.event\.pull_request\.head\.repo\.full_name == github\.repository &&\s*!startsWith\(github\.event\.pull_request\.head\.ref, 'release\/'\)/,
     )
   })
 

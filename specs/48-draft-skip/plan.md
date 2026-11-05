@@ -1,6 +1,6 @@
 # Plan: a draft PR runs no Evaluator gate and no build / ci
 
-Add `github.event.pull_request.draft == false` to the `pull_request` arm of the gate job's `if:`, and a job-level `if:` to `build / ci` that keeps `push` runs. Every caller's stub already subscribes to `ready_for_review`, so marking a draft ready starts both.
+Add `(github.event.pull_request.draft == false || github.event.action == 'converted_to_draft')` to the `pull_request` arm of the gate job's `if:`, so the draft transition still runs the gate's draft branch, and a job-level `if:` to `build / ci` that keeps `push` runs. Every caller's stub already subscribes to `ready_for_review`, so marking a draft ready starts both.
 
 ## Surfaces touched
 
