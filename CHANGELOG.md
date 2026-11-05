@@ -4,6 +4,20 @@ Every release of the fleet's shared workflows. Each entry is generated from
 the conventional-commit history by the release PR; a caller pinned to the
 floating `v1` tag receives every entry under that major on merge.
 
+## [1.6.1](https://github.com/chrisgriffin/workflows/compare/v1.6.0...v1.6.1) (2026-11-04)
+
+### Bug Fixes
+
+- **create-github-release:** read a publish back from the registry ([653784e](https://github.com/chrisgriffin/workflows/commit/653784e426ecb8b4883b201a6fa30f0a63b5be98))
+- **create-github-release:** read one extension identity once per registry ([c07a9b7](https://github.com/chrisgriffin/workflows/commit/c07a9b7b93ab7ea0e730fc1077faf259d4941763))
+- **node-ci:** carry the new releasing template hash in the docs manifest ([924e358](https://github.com/chrisgriffin/workflows/commit/924e358854f2e072a39021915bad9c1c5f0f7777))
+
+### Documentation
+
+- **spec:** the docs manifest carries the new releasing template hash ([9402d15](https://github.com/chrisgriffin/workflows/commit/9402d1570290e9b57b3a5d658ac227867964e9f7))
+- **spec:** the merge order puts this PR and a v1 release first ([d8d0840](https://github.com/chrisgriffin/workflows/commit/d8d08400f2dd793ee3b6e91628cc410ae531b429))
+- **spec:** the release job reads a publish back from the registry ([fe96e88](https://github.com/chrisgriffin/workflows/commit/fe96e885bb01686099781eb4c2164d2abca085ff))
+
 ## [1.6.0](https://github.com/chrisgriffin/workflows/compare/v1.5.0...v1.6.0) (2026-10-29)
 
 ### Features
