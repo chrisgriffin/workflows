@@ -8,3 +8,4 @@
 ## Phase 2: surfaces
 
 - [x] [T003] `README.md` — the Open VSX trusted-publishing bullet carries the sentence (T001).
+- [x] [T004] `.github/workflows/_reusable-create-github-release.yml` — the `release` and `marketplace` job comments say the step's environment carries the ID-token request variables under the grant (comments only).
