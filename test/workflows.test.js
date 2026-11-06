@@ -255,6 +255,27 @@ describe("this repo's own stubs call the bodies here at develop (README § Versi
     },
   )
 
+  // A stub hands the body only what it names (workflows#51): `inherit` would
+  // pass every secret this public repo holds to the called workflow, and a
+  // name the body does not declare fails the run at startup with zero jobs.
+  const STUBS = FILES.filter(f => !f.startsWith("_reusable-"))
+  const calls = STUBS.flatMap(stub =>
+    Object.values(load(stub).jobs)
+      .filter(job => job.uses)
+      .map(job => [stub, job]),
+  )
+
+  test.each(calls)(
+    "%s passes its secrets by name, each one the body declares (workflows#51)",
+    (_, job) => {
+      expect(job.secrets).not.toBe("inherit")
+      const body = job.uses.match(/\/(_reusable-[^@/]+\.yml)@/)[1]
+      const declared = Object.keys(load(body).on.workflow_call.secrets || {})
+      for (const name of Object.keys(job.secrets || {}))
+        expect(declared).toContain(name)
+    },
+  )
+
   it("create-github-release.yml moves the floating major tag, the thing a caller's @v1 resolves", () => {
     expect(load("create-github-release.yml").jobs.release.with).toMatchObject({
       floating_major_tag: true,
