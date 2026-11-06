@@ -9,10 +9,13 @@ Dependabot's security update for `minimatch` (advisory
 patched in `11.0.1`, affected `>=7.0.0 <11.0.1`) failed on `develop` on
 2026-11-05 and 2026-11-06.
 
-**Cause.** No package in the tree allows a patched `minimatch`: every parent
-pins a major the advisory covers — `@typescript-eslint/typescript-estree`
-and `glob@13` want `^10.2.2`, `test-exclude@7` wants `^10.2.2`, and its
-nested `glob@10` wants `^9.0.4`. A security update only moves a transitive
+**Cause.** No package in the tree allows a patched `minimatch` for an
+affected copy: every parent of an affected copy pins a major the advisory
+covers (`^9`/`^10`) — `@typescript-eslint/typescript-estree` and `glob@13`
+want `^10.2.2`, `test-exclude@7` wants `^10.2.2`, and its nested `glob@10`
+wants `^9.0.4`. ESLint's parents (`eslint`, `@eslint/config-array`,
+`@eslint/eslintrc`) pin `minimatch` `^3.1.5`, which sits outside the
+advisory. A security update only moves a transitive
 dependency within its parents' ranges, so there is nothing it can resolve
 to, and the job fails. `glob` `9.0.0`–`14.0.1` carries its own advisory
 (GHSA-3g3m-2fjr-6pw4) and pulls the vulnerable `minimatch` with it.
