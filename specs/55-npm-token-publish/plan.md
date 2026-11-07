@@ -5,10 +5,11 @@ One secret and one expression. `on.workflow_call.secrets` gains
 with the same shape. The `Publish package` step's env becomes
 `NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}`, the
 `||` fallback `_reusable-release-pr.yml` already uses for
-`RELEASE_PR_TOKEN || GITHUB_TOKEN`. The build step's `NODE_AUTH_TOKEN` stays
-`GITHUB_TOKEN`: it exists so a `build_command` can install a GitHub Packages
-dependency, which is a different registry from the one a caller publishes
-to. No new job, no new input: `npm_registry_url` already selects the
+`RELEASE_PR_TOKEN || GITHUB_TOKEN`. The build step's `NODE_AUTH_TOKEN`
+takes the same expression: setup-node's `registry-url` writes the only
+`.npmrc` auth line, for `npm_registry_url`, so a `build_command`'s installs
+go to the publish registry too, and on npmjs `GITHUB_TOKEN` is an E401 and a
+token sent off GitHub. No new job, no new input: `npm_registry_url` already selects the
 registry, and setup-node's `registry-url` already writes the `.npmrc` line
 that reads `NODE_AUTH_TOKEN`.
 

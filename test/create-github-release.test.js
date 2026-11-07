@@ -61,8 +61,8 @@ describe("the release gate", () => {
 
 // #55 — the publish step's token. GITHUB_TOKEN is what GitHub Packages
 // accepts and the public npm registry does not, so a caller publishing there
-// passes NPM_TOKEN by name and it wins; a caller passing none (resume-kit, on
-// GitHub Packages) is unchanged. Same `||` fallback as
+// passes NPM_TOKEN by name and it wins; a caller passing none (resume-kit and
+// design-drift, on GitHub Packages) is unchanged. Same `||` fallback as
 // _reusable-release-pr.yml's RELEASE_PR_TOKEN || GITHUB_TOKEN.
 describe("the npm publish step", () => {
   const publishPkg = named("Publish package")
@@ -78,9 +78,16 @@ describe("the npm publish step", () => {
     expect(String(publishPkg.if)).not.toMatch(/secrets\./)
   })
 
-  it("leaves the build step on GITHUB_TOKEN: it installs from GitHub Packages, not the publish registry", () => {
+  // setup-node's `registry-url` writes the only `.npmrc` auth line, for
+  // `npm_registry_url`, so the build step installs from the publish registry
+  // too: on npmjs, GITHUB_TOKEN there is an E401 and a token sent off GitHub.
+  it("gives the build step the same token: its installs hit the publish registry", () => {
+    const setup = steps.find(s =>
+      String(s.uses).startsWith("actions/setup-node"),
+    )
+    expect(setup.with["registry-url"]).toBe("${{ inputs.npm_registry_url }}")
     expect(named("Build release artifacts").env.NODE_AUTH_TOKEN).toBe(
-      "${{ secrets.GITHUB_TOKEN }}",
+      "${{ secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}",
     )
   })
 })

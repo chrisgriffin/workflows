@@ -16,7 +16,8 @@ The shape for a caller-supplied token already exists in this file:
 `on.workflow_call.secrets` and passed by name from a stub. `NPM_TOKEN`
 follows it. The publish step uses it as `NODE_AUTH_TOKEN` when the caller
 passed one and falls back to `GITHUB_TOKEN` when not, so every current
-caller (resume-kit, publishing to GitHub Packages) is unchanged.
+caller (resume-kit and design-drift, publishing to GitHub Packages) is
+unchanged.
 
 ## User scenarios
 
