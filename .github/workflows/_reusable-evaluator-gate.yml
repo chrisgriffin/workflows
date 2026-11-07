@@ -100,6 +100,18 @@ jobs:
       github.event.comment.author_association == 'OWNER' &&
       startsWith(github.event.comment.body, '/autofix') &&
       !startsWith(github.event.comment.body, '/autofix:'))))
+    # One gate run per PR at a time (workflows#42). The gate's writes are
+    # read-then-write: two runs seconds apart (an Autofix push and its loop
+    # comment edit) both read a thread before either replied, and both
+    # replied. `github` is the caller's context here, so the group is the
+    # caller repo and PR; a second run waits, then reads the first's writes.
+    # Never cancel in progress: that would stop a run mid-write. GitHub holds
+    # one pending run per group, so a third event supersedes a waiting one;
+    # the survivor re-reads the PR from the API, so only an owner's `/autofix`
+    # waiting at that moment is lost, and the owner re-posts it.
+    concurrency:
+      group: evaluator-gate-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

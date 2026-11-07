@@ -72,7 +72,9 @@ jobs:
 On every PR event and loop comment, runs the gate script out of
 chrisgriffin/ops, which writes the required `Evaluator` commit status and
 starts the Evaluator or Autofix routine when the PR owes a run. A pull request
-from a fork is skipped, never failed.
+from a fork is skipped, never failed. A PR's runs never overlap: a second one
+waits for the first, so it sees the first's replies
+([#42](https://github.com/chrisgriffin/workflows/issues/42)).
 
 - Inputs: none.
 - Secrets: `EVALUATOR_FIRE_TOKEN`, `AUTOFIX_FIRE_TOKEN`, `OPS_GH_TOKEN` (reads
