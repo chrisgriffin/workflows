@@ -16,7 +16,8 @@ name: Create GitHub Release (reusable)
 #                 That bare path is what every input below defaults to.
 #   an extension  builds and packages a .vsix first, then attaches it to
 #                 the release  -> `build_command` + `release_assets`.
-#   a package     publishes to GitHub Packages immediately after, in the
+#   a package     publishes to `npm_registry_url` (GitHub Packages, or npmjs
+#                 with `NPM_TOKEN`) immediately after, in the
 #                 SAME job                              -> `npm_registry_url`.
 #
 # That last one is load-bearing and must not be "tidied" into a separate
@@ -68,8 +69,9 @@ on:
       npm_registry_url:
         description: >-
           When set, `npm publish` runs against this registry immediately after
-          the release is created, in the same job. Empty (the default)
-          publishes nothing.
+          the release is created, in the same job. A registry other than
+          GitHub Packages (`https://npm.pkg.github.com`) needs the caller's
+          `NPM_TOKEN` secret. Empty (the default) publishes nothing.
         required: false
         type: string
         default: ""
@@ -113,6 +115,15 @@ on:
           `marketplace_packages` is set. Its namespace must already exist and
           match the extension's publisher. A caller publishing nothing, or
           publishing with trusted publishing, passes nothing.
+        required: false
+      NPM_TOKEN:
+        description: >-
+          A publish token for the registry `npm_registry_url` names, read
+          only when that input is set (#55). The public npm registry needs
+          one; GitHub Packages does not: with none, the publish authenticates
+          with GITHUB_TOKEN, which GitHub Packages accepts and npmjs does not.
+          A caller publishing nothing, or publishing to GitHub Packages,
+          passes nothing.
         required: false
 
 jobs:
@@ -162,10 +173,13 @@ jobs:
         if: inputs.build_command != ''
         run: ${{ inputs.build_command }}
         env:
-          # The token `registry-url` above expects, for a caller whose
-          # build_command installs a GitHub Packages dependency. Not live
-          # today — no caller passes both a build_command and a private dep —
-          # but it is one config change away, and it is exactly how
+          # The token `registry-url` above expects. setup-node writes one
+          # `.npmrc` auth line, for `npm_registry_url`, so build_command's
+          # installs authenticate against that same registry: a caller on
+          # GitHub Packages installs with GITHUB_TOKEN, and a caller on npmjs
+          # must install with its NPM_TOKEN, never GITHUB_TOKEN, which npmjs
+          # rejects (E401) and which must not leave GitHub (#55). The same
+          # expression as the publish step below. Missing it is exactly how
           # _reusable-release-pr.yml failed six consecutive runs in silence
           # (ops#652).
           #
@@ -183,7 +197,7 @@ jobs:
           #      every caller (the ops#529 outage: `_reusable-node-ci.yml`
           #      gained `packages: read` and every caller granting less
           #      hard-failed at startup_failure with zero jobs).
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Extract version
         id: version
@@ -293,7 +307,11 @@ jobs:
           inputs.npm_registry_url != ''
         run: npm publish
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The caller's NPM_TOKEN when it passed one (the public npm
+          # registry does not accept GITHUB_TOKEN), else GITHUB_TOKEN, which
+          # GitHub Packages accepts (#55). The same `||` fallback as
+          # _reusable-release-pr.yml's RELEASE_PR_TOKEN || GITHUB_TOKEN.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}
 
   # ops#1358, #16, #18. Publishes the .vsix the Release above carries to the VS
   # Code Marketplace and to Open VSX, downloaded from that Release by version

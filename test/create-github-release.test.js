@@ -59,6 +59,39 @@ describe("the release gate", () => {
   })
 })
 
+// #55 — the publish step's token. GITHUB_TOKEN is what GitHub Packages
+// accepts and the public npm registry does not, so a caller publishing there
+// passes NPM_TOKEN by name and it wins; a caller passing none (resume-kit and
+// design-drift, on GitHub Packages) is unchanged. Same `||` fallback as
+// _reusable-release-pr.yml's RELEASE_PR_TOKEN || GITHUB_TOKEN.
+describe("the npm publish step", () => {
+  const publishPkg = named("Publish package")
+
+  it("authenticates with the caller's NPM_TOKEN, falling back to GITHUB_TOKEN", () => {
+    expect(publishPkg.env.NODE_AUTH_TOKEN).toBe(
+      "${{ secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}",
+    )
+  })
+
+  it("runs only when the caller named a registry, never on a secret", () => {
+    expect(publishPkg.if).toMatch(/inputs\.npm_registry_url != ''/)
+    expect(String(publishPkg.if)).not.toMatch(/secrets\./)
+  })
+
+  // setup-node's `registry-url` writes the only `.npmrc` auth line, for
+  // `npm_registry_url`, so the build step installs from the publish registry
+  // too: on npmjs, GITHUB_TOKEN there is an E401 and a token sent off GitHub.
+  it("gives the build step the same token: its installs hit the publish registry", () => {
+    const setup = steps.find(s =>
+      String(s.uses).startsWith("actions/setup-node"),
+    )
+    expect(setup.with["registry-url"]).toBe("${{ inputs.npm_registry_url }}")
+    expect(named("Build release artifacts").env.NODE_AUTH_TOKEN).toBe(
+      "${{ secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}",
+    )
+  })
+})
+
 describe("the Release and its tags", () => {
   it("tags the merge commit on main, not the default branch's head", () => {
     const create = named("Create GitHub Release")
@@ -362,7 +395,7 @@ process.stdout.write(String(read.code))
     expect(publish.env.VERSION).toBe("${{ needs.release.outputs.version }}")
   })
 
-  it("reads the caller's input and two named secrets, with no table keyed on the repo", () => {
+  it("reads the caller's input and the three named secrets, with no table keyed on the repo", () => {
     expect(publish.env.PACKAGES).toBe("${{ inputs.marketplace_packages }}")
     expect(publish.env.VSCE_PAT).toBe("${{ secrets.VSCE_PAT }}")
     expect(publish.env.OVSX_PAT).toBe("${{ secrets.OVSX_PAT }}")
@@ -370,7 +403,10 @@ process.stdout.write(String(read.code))
     expect(Object.keys(doc.on.workflow_call.secrets)).toEqual([
       "VSCE_PAT",
       "OVSX_PAT",
+      "NPM_TOKEN",
     ])
+    for (const s of Object.values(doc.on.workflow_call.secrets))
+      expect(s.required).toBe(false)
   })
 
   it("gates inside the step, never with an if: on a secret", () => {
