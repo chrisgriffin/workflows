@@ -106,9 +106,12 @@ jobs:
     # replied. `github` is the caller's context here, so the group is the
     # caller repo and PR; a second run waits, then reads the first's writes.
     # Never cancel in progress: that would stop a run mid-write. GitHub holds
-    # one pending run per group, so a third event supersedes a waiting one;
-    # the survivor re-reads the PR from the API, so only an owner's `/autofix`
-    # waiting at that moment is lost, and the owner re-posts it.
+    # one pending run per group, so a third event cancels a waiting one. The
+    # survivor re-reads the PR from the API, but two things are lost: an
+    # owner's `/autofix` in the waiting run (the gate reads it from the
+    # payload; the owner re-posts it), and, for a waiting `pull_request` run,
+    # its `evaluator / gate` check on the head, left cancelled until a later
+    # `pull_request` event runs the gate there.
     concurrency:
       group: evaluator-gate-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number }}
       cancel-in-progress: false
