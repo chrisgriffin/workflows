@@ -167,9 +167,18 @@ VS Code extension to the Marketplace and Open VSX.
   (all but the first two defaults empty: the bare path), `floating_major_tag`
   (`false`; `true` also moves the `vX` tag onto the release, for a repo
   other repos `uses:` by tag).
-- Secrets: `VSCE_PAT` and `OVSX_PAT` (only with `marketplace_packages`;
-  `OVSX_PAT` not with trusted publishing, below).
-- The stub grants `contents: write` (`packages: write` to publish a package).
+- Secrets: `NPM_TOKEN` (only with `npm_registry_url`: the public npm
+  registry needs it, GitHub Packages does not), `VSCE_PAT` and `OVSX_PAT`
+  (only with `marketplace_packages`; `OVSX_PAT` not with trusted publishing,
+  below). All optional, passed by name.
+- The stub grants `contents: write` (`packages: write` to publish to GitHub
+  Packages).
+- The npm publish runs in the release job, right after the Release is
+  created, against `npm_registry_url`. It authenticates with `NPM_TOKEN`
+  when the caller passed one, else with the automatic `GITHUB_TOKEN`, which
+  GitHub Packages accepts and the public npm registry (`https://registry.npmjs.org`)
+  does not: a caller publishing there passes `NPM_TOKEN` from its own
+  repository secret, as the stub below passes `VSCE_PAT`.
 - Publishing is its own job, after the release: it downloads the Release's
   assets matching `marketplace_packages` and publishes them to each registry
   it can publish to: the Marketplace with `VSCE_PAT`, Open VSX with

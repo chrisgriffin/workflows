@@ -114,6 +114,15 @@ on:
           match the extension's publisher. A caller publishing nothing, or
           publishing with trusted publishing, passes nothing.
         required: false
+      NPM_TOKEN:
+        description: >-
+          A publish token for the registry `npm_registry_url` names, read
+          only when that input is set (#55). The public npm registry needs
+          one; GitHub Packages does not: with none, the publish authenticates
+          with GITHUB_TOKEN, which GitHub Packages accepts and npmjs does not.
+          A caller publishing nothing, or publishing to GitHub Packages,
+          passes nothing.
+        required: false
 
 jobs:
   release:
@@ -293,7 +302,11 @@ jobs:
           inputs.npm_registry_url != ''
         run: npm publish
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The caller's NPM_TOKEN when it passed one (the public npm
+          # registry accepts nothing else), else GITHUB_TOKEN, which GitHub
+          # Packages accepts (#55). The same `||` fallback as
+          # _reusable-release-pr.yml's RELEASE_PR_TOKEN || GITHUB_TOKEN.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}
 
   # ops#1358, #16, #18. Publishes the .vsix the Release above carries to the VS
   # Code Marketplace and to Open VSX, downloaded from that Release by version
