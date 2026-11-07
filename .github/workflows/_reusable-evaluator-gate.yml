@@ -80,8 +80,17 @@ jobs:
     # ruleset that requires this check. Skipped, the check-run completes and
     # the `Evaluator` commit status is simply never posted, so a fork PR
     # waits for a maintainer rather than a machine.
+    #
+    # A draft's own events are skipped too (workflows#48): a parked draft
+    # spends nothing, and `ready_for_review`, which every stub subscribes to,
+    # starts its first grade. The one draft event still let through is
+    # `converted_to_draft` itself: it is what runs the gate's draft branch
+    # (ops pr-loop/state.mjs), which supersedes a `working` Evaluator block
+    # and sets the `Evaluator` status to pending (ops#1579).
     if: >-
       (github.event_name == 'pull_request' &&
+      (github.event.pull_request.draft == false ||
+      github.event.action == 'converted_to_draft') &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       !startsWith(github.event.pull_request.head.ref, 'release/')) ||
       (github.event.issue.pull_request &&
@@ -91,6 +100,21 @@ jobs:
       github.event.comment.author_association == 'OWNER' &&
       startsWith(github.event.comment.body, '/autofix') &&
       !startsWith(github.event.comment.body, '/autofix:'))))
+    # One gate run per PR at a time (workflows#42). The gate's writes are
+    # read-then-write: two runs seconds apart (an Autofix push and its loop
+    # comment edit) both read a thread before either replied, and both
+    # replied. `github` is the caller's context here, so the group is the
+    # caller repo and PR; a second run waits, then reads the first's writes.
+    # Never cancel in progress: that would stop a run mid-write. GitHub holds
+    # one pending run per group, so a third event cancels a waiting one. The
+    # survivor re-reads the PR from the API, but two things are lost: an
+    # owner's `/autofix` in the waiting run (the gate reads it from the
+    # payload; the owner re-posts it), and, for a waiting `pull_request` run,
+    # its `evaluator / gate` check on the head, left cancelled until a later
+    # `pull_request` event runs the gate there.
+    concurrency:
+      group: evaluator-gate-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

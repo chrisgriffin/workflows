@@ -26,6 +26,10 @@ permissions:
 jobs:
   ci:
     name: build / ci
+    # A draft waits under the fleet's in-flight cap and spends no minutes;
+    # `ready_for_review` runs it on the tree it has. A skipped job still
+    # satisfies a required check.
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

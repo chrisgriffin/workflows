@@ -73,6 +73,27 @@ describe("every _reusable-*.yml is a workflow_call body", () => {
 describe("_reusable-evaluator-gate.yml — one job running the gate action", () => {
   const gate = load("_reusable-evaluator-gate.yml")
 
+  it("skips a draft's pull_request events but converted_to_draft, and only those (workflows#48)", () => {
+    const cond = gate.jobs.gate.if
+    // converted_to_draft runs the gate's draft branch, which supersedes a
+    // working Evaluator block and sets the status to pending (ops#1579).
+    const draftClause =
+      /\(github\.event\.pull_request\.draft == false \|\|\s*github\.event\.action == 'converted_to_draft'\)/
+    expect(cond).toMatch(
+      new RegExp(
+        "github\\.event_name == 'pull_request' &&\\s*" + draftClause.source,
+      ),
+    )
+    expect(cond.match(/draft == false/g)).toHaveLength(1)
+    expect(cond.match(/converted_to_draft/g)).toHaveLength(1)
+  })
+
+  it("this repo's build / ci skips a draft and still runs on push (workflows#48)", () => {
+    expect(load("build-check.yml").jobs.ci.if).toBe(
+      "github.event_name == 'push' || github.event.pull_request.draft == false",
+    )
+  })
+
   it("one job, one step: the pr-loop-gate action at develop, with both fire tokens, the token that reads the script, and the user token that resolves a thread", () => {
     expect(Object.keys(gate.jobs)).toEqual(["gate"])
     expect(gate.jobs.gate.steps).toHaveLength(1)
@@ -99,8 +120,21 @@ describe("_reusable-evaluator-gate.yml — one job running the gate action", () 
     // A release head never wakes the gate (ops#1372): the Release PR job
     // posts that status itself.
     expect(gate.jobs.gate.if).toMatch(
-      /github\.event_name == 'pull_request' &&\s*github\.event\.pull_request\.head\.repo\.full_name == github\.repository &&\s*!startsWith\(github\.event\.pull_request\.head\.ref, 'release\/'\)/,
+      /github\.event_name == 'pull_request' &&\s*\(github\.event\.pull_request\.draft == false \|\|\s*github\.event\.action == 'converted_to_draft'\) &&\s*github\.event\.pull_request\.head\.repo\.full_name == github\.repository &&\s*!startsWith\(github\.event\.pull_request\.head\.ref, 'release\/'\)/,
     )
+  })
+
+  // workflows#42 — two runs for one PR seconds apart (a push and its loop
+  // comment edit) both read a thread before either replied, and both replied.
+  // One group per caller repo and PR: the second run waits, then sees the
+  // first's reply. Never cancel in progress: a cancelled run stops mid-write.
+  it("runs one gate per PR at a time, queueing the next rather than cancelling (workflows#42)", () => {
+    expect(gate.jobs.gate.concurrency).toEqual({
+      group:
+        "evaluator-gate-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number }}",
+      "cancel-in-progress": false,
+    })
+    expect(gate.concurrency).toBeUndefined()
   })
 
   it("a comment runs it only for a loop comment from a routine, or an owner's /autofix", () => {
@@ -231,6 +265,27 @@ describe("this repo's own stubs call the bodies here at develop (README § Versi
       expect(jobs[0].uses).toBe(
         `chrisgriffin/workflows/.github/workflows/${body}@develop`,
       )
+    },
+  )
+
+  // A stub hands the body only what it names (workflows#51): `inherit` would
+  // pass every secret this public repo holds to the called workflow, and a
+  // name the body does not declare fails the run at startup with zero jobs.
+  const STUBS = FILES.filter(f => !f.startsWith("_reusable-"))
+  const calls = STUBS.flatMap(stub =>
+    Object.values(load(stub).jobs)
+      .filter(job => job.uses)
+      .map(job => [stub, job]),
+  )
+
+  test.each(calls)(
+    "%s passes its secrets by name, each one the body declares (workflows#51)",
+    (_, job) => {
+      expect(job.secrets).not.toBe("inherit")
+      const body = job.uses.match(/\/(_reusable-[^@/]+\.yml)@/)[1]
+      const declared = Object.keys(load(body).on.workflow_call.secrets || {})
+      for (const name of Object.keys(job.secrets || {}))
+        expect(declared).toContain(name)
     },
   )
 
