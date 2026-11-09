@@ -72,7 +72,14 @@ jobs:
 On every PR event and loop comment, runs the gate script out of
 chrisgriffin/ops, which writes the required `Evaluator` commit status and
 starts the Evaluator or Autofix routine when the PR owes a run. A pull request
-from a fork is skipped, never failed.
+from a fork is skipped, never failed. A PR's runs never overlap: a second one
+waits for the first, so it sees the first's replies
+([#42](https://github.com/chrisgriffin/workflows/issues/42)). GitHub holds
+only one waiting run per PR, so a third event cancels the waiting one, and
+what that run carried is lost: an owner's `/autofix` in it never starts a
+round (the owner posts it again), and a cancelled `pull_request` run leaves a
+cancelled `evaluator / gate` check on its head until a later `pull_request`
+event runs the gate there.
 
 - Inputs: none.
 - Secrets: `EVALUATOR_FIRE_TOKEN`, `AUTOFIX_FIRE_TOKEN`, `OPS_GH_TOKEN` (reads
@@ -167,9 +174,18 @@ VS Code extension to the Marketplace and Open VSX.
   (all but the first two defaults empty: the bare path), `floating_major_tag`
   (`false`; `true` also moves the `vX` tag onto the release, for a repo
   other repos `uses:` by tag).
-- Secrets: `VSCE_PAT` and `OVSX_PAT` (only with `marketplace_packages`;
-  `OVSX_PAT` not with trusted publishing, below).
-- The stub grants `contents: write` (`packages: write` to publish a package).
+- Secrets: `NPM_TOKEN` (only with `npm_registry_url`: the public npm
+  registry needs it, GitHub Packages does not), `VSCE_PAT` and `OVSX_PAT`
+  (only with `marketplace_packages`; `OVSX_PAT` not with trusted publishing,
+  below). All optional, passed by name.
+- The stub grants `contents: write` (`packages: write` to publish to GitHub
+  Packages).
+- The npm publish runs in the release job, right after the Release is
+  created, against `npm_registry_url`. It authenticates with `NPM_TOKEN`
+  when the caller passed one, else with the automatic `GITHUB_TOKEN`, which
+  GitHub Packages accepts and the public npm registry (`https://registry.npmjs.org`)
+  does not: a caller publishing there passes `NPM_TOKEN` from its own
+  repository secret, as the stub below passes `VSCE_PAT`.
 - Publishing is its own job, after the release: it downloads the Release's
   assets matching `marketplace_packages` and publishes them to each registry
   it can publish to: the Marketplace with `VSCE_PAT`, Open VSX with
@@ -209,7 +225,10 @@ VS Code extension to the Marketplace and Open VSX.
   `create-github-release.yml`). Then grant `id-token: write` beside
   `contents: write` in the stub and stop passing `OVSX_PAT`. A token, when
   passed, still wins. Open VSX trusts any ref that runs the registered
-  stub.
+  stub, and any step in that run: the grant reaches every step of the
+  release run, the caller's `build_command` and whatever it installs
+  included, not only the Open VSX publish step, so any of them can request
+  the ID token Open VSX accepts.
 
 ```yaml
 jobs:

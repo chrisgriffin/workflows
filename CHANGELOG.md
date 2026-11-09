@@ -4,6 +4,31 @@ Every release of the fleet's shared workflows. Each entry is generated from
 the conventional-commit history by the release PR; a caller pinned to the
 floating `v1` tag receives every entry under that major on merge.
 
+## [1.7.0](https://github.com/chrisgriffin/workflows/compare/v1.6.1...v1.7.0) (2026-11-06)
+
+### Features
+
+- **release:** publish with the caller's NPM_TOKEN, falling back to GITHUB_TOKEN ([c9abae7](https://github.com/chrisgriffin/workflows/commit/c9abae7367e3387d2aa43237a96050193bc0bba4))
+
+### Bug Fixes
+
+- **ci:** a draft PR runs no Evaluator gate and no build / ci ([034fb07](https://github.com/chrisgriffin/workflows/commit/034fb07275961ca040189a4fa902b8bbc5a27ded)), closes [#48](https://github.com/chrisgriffin/workflows/issues/48)
+- **ci:** let converted_to_draft through the draft skip ([f8bb8c4](https://github.com/chrisgriffin/workflows/commit/f8bb8c4d803f5a82eade961e712d6b32eb0ca7ac))
+- **deps:** override glob and minimatch to their patched majors ([639ae34](https://github.com/chrisgriffin/workflows/commit/639ae34f14bc8a7a3f63d2fd2b093d080fdc9960))
+- **evaluator-gate:** run one gate per PR at a time ([8746aa1](https://github.com/chrisgriffin/workflows/commit/8746aa19d7e3c89c106b65ff954d8a60c96eacbf))
+- **release:** send NPM_TOKEN to the build step's installs too ([636d407](https://github.com/chrisgriffin/workflows/commit/636d407b6ee667208ddb374d3c5c3f0affc21c72))
+
+### Documentation
+
+- **evaluator-gate:** say what a superseded waiting run loses ([6cb0dca](https://github.com/chrisgriffin/workflows/commit/6cb0dca31492cb262ce9f0c6b090be085c44502d))
+- **release:** correct the workflow comments that read narrower than the id-token grant ([bb2b799](https://github.com/chrisgriffin/workflows/commit/bb2b7991c258708452f328818367976609c2ec7f))
+- **release:** say the Open VSX id-token grant reaches every step of the release run ([174e5ed](https://github.com/chrisgriffin/workflows/commit/174e5edb16229a1743a2119b9ddb36e3be5129ea))
+- **spec:** Dependabot's minimatch security update fails on develop ([62825bc](https://github.com/chrisgriffin/workflows/commit/62825bc6a08d81474a2fa72e248b92d9f2bf6bc2))
+- **spec:** narrow the minimatch cause to parents of affected copies ([5461cc4](https://github.com/chrisgriffin/workflows/commit/5461cc4f9e6c3108ce7d5bd4e1b0d2e66dd35ccb))
+- **spec:** README says the Open VSX id-token grant reaches every step of the release run ([521bc37](https://github.com/chrisgriffin/workflows/commit/521bc37a3edb4aedc8f7361f2938a4e1bc1e5a26))
+- **specs:** 48-draft-skip spec, plan and tasks ([eae1f57](https://github.com/chrisgriffin/workflows/commit/eae1f57616bc3d59aa7e118476aa2b966d8c3322))
+- **spec:** the shared release workflow publishes to npmjs when a caller passes an NPM_TOKEN secret ([cecf4a0](https://github.com/chrisgriffin/workflows/commit/cecf4a093619ae9fb09a8fb5e91e2624a2ed950c))
+
 ## [1.6.1](https://github.com/chrisgriffin/workflows/compare/v1.6.0...v1.6.1) (2026-11-04)
 
 ### Bug Fixes
