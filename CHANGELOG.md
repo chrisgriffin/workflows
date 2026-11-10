@@ -4,6 +4,13 @@ Every release of the fleet's shared workflows. Each entry is generated from
 the conventional-commit history by the release PR; a caller pinned to the
 floating `v1` tag receives every entry under that major on merge.
 
+## [1.7.1](https://github.com/chrisgriffin/workflows/compare/v1.7.0...v1.7.1) (2026-11-09)
+
+### Bug Fixes
+
+- **release-pr:** warn when the release token cannot read its user ([74889dd](https://github.com/chrisgriffin/workflows/commit/74889dd44206fd699f6b1b035deb9379deb11554))
+- **release-pr:** write the release commit as the token's account ([e674aa9](https://github.com/chrisgriffin/workflows/commit/e674aa9ac43cfd89a02c0fa330fc00c033b86d19)), closes [#60](https://github.com/chrisgriffin/workflows/issues/60)
+
 ## [1.7.0](https://github.com/chrisgriffin/workflows/compare/v1.6.1...v1.7.0) (2026-11-06)
 
 ### Features
