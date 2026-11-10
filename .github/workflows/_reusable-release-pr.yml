@@ -33,7 +33,12 @@ name: (reusable) Release PR
 #
 # Secrets:
 #   RELEASE_PR_TOKEN   (optional) fine-grained PAT / GitHub App token used to
-#                      push release/next and open the PR. Must NOT be the
+#                      push release/next and open the PR. Its account also
+#                      authors the release commit, read from `gh api user`;
+#                      a token that cannot read /user (GITHUB_TOKEN, or an
+#                      App installation token) leaves github-actions[bot] as
+#                      the author, with a warning when this secret is set.
+#                      Must NOT be the
 #                      built-in GITHUB_TOKEN: GitHub suppresses workflow runs
 #                      for events created by GITHUB_TOKEN (recursion guard), so
 #                      a token-created release PR never triggers other CI
@@ -80,7 +85,10 @@ on:
         description: >-
           A PAT or App token that pushes `release/next` and opens the PR, so
           the PR's checks fire (GITHUB_TOKEN's events start no workflow).
-          Falls back to GITHUB_TOKEN; the checks must then be started by hand.
+          Its account also authors the release commit; a token that cannot
+          read `/user` (an App installation token, like GITHUB_TOKEN) leaves
+          `github-actions[bot]` as the author. Falls back to GITHUB_TOKEN; the
+          checks must then be started by hand.
         required: false
       OPS_GH_TOKEN:
         description: Fine-grained PAT with actions write on chrisgriffin/ops, for the conflict-sweep dispatch.
@@ -276,11 +284,34 @@ jobs:
           # and no private deps still works.
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN || secrets.RELEASE_PR_TOKEN || secrets.GITHUB_TOKEN }}
 
+      # The release commit is the token's account (cgio-agent across the
+      # fleet), never github-actions[bot]: Netlify refuses to build a private
+      # repo's commit by an author it does not recognize, so a bot-authored
+      # release got no deploy preview (workflows#60). GITHUB_TOKEN cannot read
+      # /user, so a caller with no PAT keeps the bot.
       - name: Configure git
         if: steps.in-sync.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN || secrets.GITHUB_TOKEN }}
+          # A set token that fails /user (an API error, a rate limit, an App
+          # installation token) keeps the bot too, but says so: the push still
+          # succeeds and the release silently loses its deploy preview.
+          HAS_RELEASE_PR_TOKEN: ${{ secrets.RELEASE_PR_TOKEN != '' }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          ERR=$(mktemp)
+          if ME=$(gh api user --jq '"\(.login) \(.id)"' 2>"$ERR") && [ -n "$ME" ]; then
+            read -r LOGIN ID <<< "$ME"
+            git config user.name "$LOGIN"
+            git config user.email "$ID+$LOGIN@users.noreply.github.com"
+          else
+            if [ "$HAS_RELEASE_PR_TOKEN" = "true" ]; then
+              WHY=$(tr '\n' ' ' < "$ERR" | sed 's/ *$//')
+              echo "::warning title=Release commit author::RELEASE_PR_TOKEN is set but \`gh api user\` failed (${WHY:-no output}), so the release commit is github-actions[bot]; a host that checks the author (Netlify) may refuse to build it."
+            fi
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+          fi
+          rm -f "$ERR"
 
       - name: Install the changelog tooling into its own resolvable prefix
         if: steps.in-sync.outputs.skip != 'true'
