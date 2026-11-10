@@ -1035,3 +1035,54 @@ describe("_reusable-release-pr.yml — a failure in the step names its command (
     )
   })
 })
+
+describe("_reusable-release-pr.yml — the release commit is the token's account (workflows#60)", () => {
+  const step = yaml
+    .load(text)
+    .jobs["release-pr"].steps.find(s => s.name === "Configure git")
+
+  // Runs the step in a fresh repo with `gh` stubbed, and returns the author it set.
+  const author = ghScript => {
+    const dir = mkdtempSync(join(os.tmpdir(), "release-author-"))
+    mkdirSync(join(dir, "bin"))
+    writeFileSync(join(dir, "bin", "gh"), `#!/bin/bash\n${ghScript}\n`, {
+      mode: 0o755,
+    })
+    spawnSync("git", ["init", "-q", dir])
+    const r = spawnSync("bash", ["-e", "-c", step.run], {
+      cwd: dir,
+      env: { ...process.env, PATH: `${join(dir, "bin")}:${process.env.PATH}` },
+      encoding: "utf8",
+    })
+    expect(r.status).toBe(0)
+    const get = key =>
+      spawnSync("git", ["-C", dir, "config", key], {
+        encoding: "utf8",
+      }).stdout.trim()
+    return [get("user.name"), get("user.email")]
+  }
+
+  it("reads the account from the release token", () => {
+    expect(step.env.GH_TOKEN).toBe(
+      "${{ secrets.RELEASE_PR_TOKEN || secrets.GITHUB_TOKEN }}",
+    )
+  })
+
+  it("writes the commit as the token's login and noreply address", () => {
+    expect(author('echo "cgio-agent 298533442"')).toEqual([
+      "cgio-agent",
+      "298533442+cgio-agent@users.noreply.github.com",
+    ])
+  })
+
+  it("keeps github-actions[bot] when the token cannot read its user", () => {
+    const bot = [
+      "github-actions[bot]",
+      "github-actions[bot]@users.noreply.github.com",
+    ]
+    expect(
+      author("echo 'Resource not accessible by integration' >&2; exit 1"),
+    ).toEqual(bot)
+    expect(author("exit 0")).toEqual(bot)
+  })
+})

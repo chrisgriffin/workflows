@@ -276,11 +276,24 @@ jobs:
           # and no private deps still works.
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN || secrets.RELEASE_PR_TOKEN || secrets.GITHUB_TOKEN }}
 
+      # The release commit is the token's account (cgio-agent across the
+      # fleet), never github-actions[bot]: Netlify refuses to build a private
+      # repo's commit by an author it does not recognize, so a bot-authored
+      # release got no deploy preview (workflows#60). GITHUB_TOKEN cannot read
+      # /user, so a caller with no PAT keeps the bot.
       - name: Configure git
         if: steps.in-sync.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ME=$(gh api user --jq '"\(.login) \(.id)"' 2>/dev/null) && [ -n "$ME" ]; then
+            read -r LOGIN ID <<< "$ME"
+            git config user.name "$LOGIN"
+            git config user.email "$ID+$LOGIN@users.noreply.github.com"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+          fi
 
       - name: Install the changelog tooling into its own resolvable prefix
         if: steps.in-sync.outputs.skip != 'true'
