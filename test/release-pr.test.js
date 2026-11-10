@@ -1041,8 +1041,10 @@ describe("_reusable-release-pr.yml — the release commit is the token's account
     .load(text)
     .jobs["release-pr"].steps.find(s => s.name === "Configure git")
 
-  // Runs the step in a fresh repo with `gh` stubbed, and returns the author it set.
-  const author = ghScript => {
+  // Runs the step in a fresh repo with `gh` stubbed, and returns the author it
+  // set and what it printed. `hasToken` stands for whether RELEASE_PR_TOKEN is
+  // set, as the step's HAS_RELEASE_PR_TOKEN env gives it.
+  const run = (ghScript, hasToken = "true") => {
     const dir = mkdtempSync(join(os.tmpdir(), "release-author-"))
     mkdirSync(join(dir, "bin"))
     writeFileSync(join(dir, "bin", "gh"), `#!/bin/bash\n${ghScript}\n`, {
@@ -1051,7 +1053,11 @@ describe("_reusable-release-pr.yml — the release commit is the token's account
     spawnSync("git", ["init", "-q", dir])
     const r = spawnSync("bash", ["-e", "-c", step.run], {
       cwd: dir,
-      env: { ...process.env, PATH: `${join(dir, "bin")}:${process.env.PATH}` },
+      env: {
+        ...process.env,
+        PATH: `${join(dir, "bin")}:${process.env.PATH}`,
+        HAS_RELEASE_PR_TOKEN: hasToken,
+      },
       encoding: "utf8",
     })
     expect(r.status).toBe(0)
@@ -1059,8 +1065,13 @@ describe("_reusable-release-pr.yml — the release commit is the token's account
       spawnSync("git", ["-C", dir, "config", key], {
         encoding: "utf8",
       }).stdout.trim()
-    return [get("user.name"), get("user.email")]
+    return { author: [get("user.name"), get("user.email")], out: r.stdout }
   }
+  const author = (ghScript, hasToken) => run(ghScript, hasToken).author
+  const bot = [
+    "github-actions[bot]",
+    "github-actions[bot]@users.noreply.github.com",
+  ]
 
   it("reads the account from the release token", () => {
     expect(step.env.GH_TOKEN).toBe(
@@ -1076,13 +1087,48 @@ describe("_reusable-release-pr.yml — the release commit is the token's account
   })
 
   it("keeps github-actions[bot] when the token cannot read its user", () => {
-    const bot = [
-      "github-actions[bot]",
-      "github-actions[bot]@users.noreply.github.com",
-    ]
     expect(
       author("echo 'Resource not accessible by integration' >&2; exit 1"),
     ).toEqual(bot)
     expect(author("exit 0")).toEqual(bot)
+  })
+
+  it("knows whether RELEASE_PR_TOKEN is set", () => {
+    expect(step.env.HAS_RELEASE_PR_TOKEN).toBe(
+      "${{ secrets.RELEASE_PR_TOKEN != '' }}",
+    )
+  })
+
+  it("warns, naming the failed lookup, when RELEASE_PR_TOKEN is set but cannot read its user", () => {
+    for (const [gh, why] of [
+      ["echo 'HTTP 502: Bad Gateway' >&2; exit 1", "HTTP 502: Bad Gateway"],
+      [
+        "echo 'API rate limit exceeded' >&2; echo 'HTTP 403' >&2; exit 1",
+        "API rate limit exceeded HTTP 403",
+      ],
+      ["exit 0", "no output"],
+    ]) {
+      const r = run(gh, "true")
+      expect(r.author).toEqual(bot)
+      expect(r.out).toMatch(
+        /^::warning title=Release commit author::RELEASE_PR_TOKEN is set but `gh api user` failed/m,
+      )
+      expect(r.out).toContain(`(${why})`)
+    }
+  })
+
+  it("stays quiet when RELEASE_PR_TOKEN is unset and GITHUB_TOKEN cannot read its user", () => {
+    for (const hasToken of ["false", ""]) {
+      const r = run(
+        "echo 'Resource not accessible by integration' >&2; exit 1",
+        hasToken,
+      )
+      expect(r.author).toEqual(bot)
+      expect(r.out).not.toContain("::warning")
+    }
+  })
+
+  it("does not warn when the token's account is read", () => {
+    expect(run('echo "cgio-agent 298533442"').out).not.toContain("::warning")
   })
 })
