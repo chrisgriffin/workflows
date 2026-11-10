@@ -139,7 +139,9 @@ lists the shipping PRs, and dispatches the operator's conflict sweep.
   `version_files` (empty: space-separated JSON files whose `"version"` value
   is set in place to the new version and committed with the release; a file
   with no `"version"` fails the step; it installs nothing).
-- Secrets: `RELEASE_PR_TOKEN` (a PAT, so the PR's checks fire),
+- Secrets: `RELEASE_PR_TOKEN` (a PAT, so the PR's checks fire; its account
+  also authors the release commit, and a token that cannot read `/user`, an
+  App installation token like `GITHUB_TOKEN`, leaves `github-actions[bot]`),
   `OPS_GH_TOKEN` (the sweep dispatch), `NODE_AUTH_TOKEN` (optional).
 - Variables: `RELEASE_AS` (optional), an Actions variable on the calling
   repo, set in its settings rather than by a commit: a plain `X.Y.Z` (say
