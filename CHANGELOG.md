@@ -4,6 +4,12 @@ Every release of the fleet's shared workflows. Each entry is generated from
 the conventional-commit history by the release PR; a caller pinned to the
 floating `v1` tag receives every entry under that major on merge.
 
+## [1.7.2](https://github.com/chrisgriffin/workflows/compare/v1.7.1...v1.7.2) (2026-11-14)
+
+### Bug Fixes
+
+- **node-ci:** carry the AI-tell single-source row in the inline RULES ([ee7685d](https://github.com/chrisgriffin/workflows/commit/ee7685dab2254580b787e6776a757512d2dae99d)), closes [#63](https://github.com/chrisgriffin/workflows/issues/63)
+
 ## [1.7.1](https://github.com/chrisgriffin/workflows/compare/v1.7.0...v1.7.1) (2026-11-09)
 
 ### Bug Fixes
