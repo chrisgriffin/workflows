@@ -4,6 +4,5 @@
    `.github/workflows/_reusable-evaluator-gate.yml`; rewrite the comment above it.
 2. Expect `queue: "max"` in `test/workflows.test.js`'s concurrency test.
 3. Rewrite the README's gate paragraph.
-4. Check the syntax is valid at job level inside a called workflow: a commit
-   points this repo's own stub at the branch, the PR's gate run must start and
-   pass, then the commit is reverted before review.
+4. The live check is this repo's own stub, which calls the body at `develop`:
+   the first PR here after merge runs `queue: max` before `v1` moves the fleet.
