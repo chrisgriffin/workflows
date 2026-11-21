@@ -128,11 +128,14 @@ describe("_reusable-evaluator-gate.yml — one job running the gate action", () 
   // comment edit) both read a thread before either replied, and both replied.
   // One group per caller repo and PR: the second run waits, then sees the
   // first's reply. Never cancel in progress: a cancelled run stops mid-write.
-  it("runs one gate per PR at a time, queueing the next rather than cancelling (workflows#42)", () => {
+  // workflows#66: `queue: max`, or a third event cancels the waiting run and
+  // a `pull_request` run's check stays cancelled on the head.
+  it("runs one gate per PR at a time, queueing every next run rather than cancelling (workflows#42, workflows#66)", () => {
     expect(gate.jobs.gate.concurrency).toEqual({
       group:
         "evaluator-gate-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number }}",
       "cancel-in-progress": false,
+      queue: "max",
     })
     expect(gate.concurrency).toBeUndefined()
   })
