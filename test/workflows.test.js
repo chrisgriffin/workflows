@@ -308,6 +308,18 @@ describe("this repo's own stubs call the bodies here at develop (README § Versi
     expect(wf.jobs.ci.name).toBe("build / ci")
     expect(wf.jobs.ci["runs-on"]).toBeDefined()
   })
+
+  // workflows#66: actionlint v1.7.12 rejects `concurrency.queue`, which
+  // GitHub accepts. The lint ignores that one message and nothing wider.
+  it("actionlint ignores only the unknown `queue` concurrency key", () => {
+    const lint = load("build-check.yml").jobs.ci.steps.find(
+      s => s.name === "Lint every workflow",
+    ).run
+    const ignores = [...lint.matchAll(/-ignore '([^']+)'/g)].map(m => m[1])
+    expect(ignores).toEqual([
+      'unexpected key "queue" for "concurrency" section',
+    ])
+  })
 })
 
 // Every body's checkout persists no credential (ops#1685), so git holds no
