@@ -49,8 +49,12 @@ jobs:
           tar -xzf actionlint.tar.gz actionlint
           ./actionlint -version
 
+      # `queue` on a concurrency group is GitHub syntax since 2026-05-07
+      # (workflows#66), and no actionlint release knows it yet (v1.7.12 is
+      # the newest). Only that one key is ignored; drop the -ignore when a
+      # bump accepts it.
       - name: Lint every workflow
-        run: ./actionlint -color -shellcheck=shellcheck .github/workflows/*.yml
+        run: ./actionlint -color -shellcheck=shellcheck -ignore 'unexpected key "queue" for "concurrency" section' .github/workflows/*.yml
 
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
