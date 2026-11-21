@@ -75,8 +75,9 @@ starts the Evaluator or Autofix routine when the PR owes a run. A pull request
 from a fork is skipped, never failed. A PR's runs never overlap: a second one
 waits for the first, so it sees the first's replies
 ([#42](https://github.com/chrisgriffin/workflows/issues/42)). The group
-queues every waiting run, up to 100, first in first out, so no event cancels
-another and no `evaluator / gate` check is left cancelled on a head
+queues up to 100 waiting runs, first in first out, so a burst of events no
+longer cancels the waiting `pull_request` run and leaves its `evaluator / gate`
+check cancelled on a head
 ([#66](https://github.com/chrisgriffin/workflows/issues/66)).
 
 - Inputs: none.
