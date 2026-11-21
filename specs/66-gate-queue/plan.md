@@ -6,3 +6,8 @@
 3. Rewrite the README's gate paragraph.
 4. The live check is this repo's own stub, which calls the body at `develop`:
    the first PR here after merge runs `queue: max` before `v1` moves the fleet.
+
+## Surfaces touched
+
+- Every fleet repo's gate stub calls this body (`@develop` here, `@v1` elsewhere), so the change reaches the fleet when `v1` moves.
+- cost — none.

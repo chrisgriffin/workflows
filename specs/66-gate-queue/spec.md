@@ -18,6 +18,7 @@ passed. `queue: max` holds up to 100 waiting runs, first in first out.
 
 ## Success criteria
 
+- [ ] `_reusable-evaluator-gate.yml`'s gate job's concurrency is `queue: max` with `cancel-in-progress: false`, and its comment no longer describes the lost runs.
 - [ ] **Runnable:** `npx jest test/workflows.test.js` passes with the concurrency test expecting `queue: max`, and fails on `develop`.
 - [ ] `npm run verify` passes.
 - [ ] after-merge: once `v1` moves, a PR whose push and loop comment edit land within seconds keeps a green `evaluator / gate` check on its head.
