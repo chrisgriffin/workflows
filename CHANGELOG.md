@@ -4,6 +4,23 @@ Every release of the fleet's shared workflows. Each entry is generated from
 the conventional-commit history by the release PR; a caller pinned to the
 floating `v1` tag receives every entry under that major on merge.
 
+## [1.7.3](https://github.com/chrisgriffin/workflows/compare/v1.7.2...v1.7.3) (2026-11-20)
+
+### Bug Fixes
+
+- **gate:** queue every waiting gate run, so none is cancelled ([a0a2ac6](https://github.com/chrisgriffin/workflows/commit/a0a2ac690312fd4d0d9cfba514c20722a88cac80)), closes [#66](https://github.com/chrisgriffin/workflows/issues/66)
+
+### Reverts
+
+- point the stub back at develop ([2704f48](https://github.com/chrisgriffin/workflows/commit/2704f487c7de3a87a93f2c99b9e5e7541fb3aaa8))
+
+### Documentation
+
+- **readme:** the gate queue holds up to 100 waiting runs, not every run ([dae60ce](https://github.com/chrisgriffin/workflows/commit/dae60cea470d0e4dac2e8ff15b19c59e437acae4))
+- **spec:** record the actionlint ignore for workflows[#66](https://github.com/chrisgriffin/workflows/issues/66) ([b8c58e0](https://github.com/chrisgriffin/workflows/commit/b8c58e062c57d5e1cdcbf2fdf78df4229f9e584d))
+- **spec:** success criteria and surfaces for workflows[#66](https://github.com/chrisgriffin/workflows/issues/66) ([8194f23](https://github.com/chrisgriffin/workflows/commit/8194f23403ab33b009664284ef97296829bb6c52))
+- **spec:** the live check is this repo's own develop stub ([4b1d1b5](https://github.com/chrisgriffin/workflows/commit/4b1d1b57e26f81a17927d1b43330230677b7e7f4))
+
 ## [1.7.2](https://github.com/chrisgriffin/workflows/compare/v1.7.1...v1.7.2) (2026-11-14)
 
 ### Bug Fixes
