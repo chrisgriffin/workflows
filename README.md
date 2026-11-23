@@ -74,12 +74,11 @@ chrisgriffin/ops, which writes the required `Evaluator` commit status and
 starts the Evaluator or Autofix routine when the PR owes a run. A pull request
 from a fork is skipped, never failed. A PR's runs never overlap: a second one
 waits for the first, so it sees the first's replies
-([#42](https://github.com/chrisgriffin/workflows/issues/42)). GitHub holds
-only one waiting run per PR, so a third event cancels the waiting one, and
-what that run carried is lost: an owner's `/autofix` in it never starts a
-round (the owner posts it again), and a cancelled `pull_request` run leaves a
-cancelled `evaluator / gate` check on its head until a later `pull_request`
-event runs the gate there.
+([#42](https://github.com/chrisgriffin/workflows/issues/42)). The group
+queues up to 100 waiting runs, first in first out, so a burst of events no
+longer cancels the waiting `pull_request` run and leaves its `evaluator / gate`
+check cancelled on a head
+([#66](https://github.com/chrisgriffin/workflows/issues/66)).
 
 - Inputs: none.
 - Secrets: `EVALUATOR_FIRE_TOKEN`, `AUTOFIX_FIRE_TOKEN`, `OPS_GH_TOKEN` (reads
