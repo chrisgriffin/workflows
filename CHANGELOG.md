@@ -4,6 +4,17 @@ Every release of the fleet's shared workflows. Each entry is generated from
 the conventional-commit history by the release PR; a caller pinned to the
 floating `v1` tag receives every entry under that major on merge.
 
+## [1.7.4](https://github.com/chrisgriffin/workflows/compare/v1.7.3...v1.7.4) (2026-11-25)
+
+### Bug Fixes
+
+- **node-ci:** carry the new ADR-index and architecture template hashes in the docs manifest ([82fa57c](https://github.com/chrisgriffin/workflows/commit/82fa57c09daf6ca9a9c0074914adbf1a7ba002b7))
+
+### Documentation
+
+- **spec:** name the docs-manifest migration and its consumers in the plan ([8f81164](https://github.com/chrisgriffin/workflows/commit/8f81164125cf9f543a4523d3aa0867bbfd54b555))
+- **spec:** the docs manifest carries the new ADR-index and architecture template hashes ([a89809f](https://github.com/chrisgriffin/workflows/commit/a89809fdc589f7282ad2484593c408a5583679ca))
+
 ## [1.7.3](https://github.com/chrisgriffin/workflows/compare/v1.7.2...v1.7.3) (2026-11-20)
 
 ### Bug Fixes
